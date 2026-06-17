@@ -124,6 +124,7 @@ export type {
   LendTransaction,
   LendTransactionReceipt,
   MorphoMarketParams,
+  PriceQuote,
   SwapConfig,
   SwapExecuteParams,
   SwapMarket,
