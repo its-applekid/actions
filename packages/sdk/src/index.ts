@@ -111,6 +111,7 @@ export type {
   EOATransactionReceipt,
   GetBorrowMarketsParams,
   GetBorrowPositionParams,
+  GetPositionsParams,
   LendAction,
   LendConfig,
   LendMarket,
