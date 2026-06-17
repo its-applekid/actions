@@ -109,7 +109,7 @@ describe('UniswapSwapProvider', () => {
       expect(result.transactionData.permit2Approval).toBeDefined()
     })
 
-    it('throws without fee/tickSpacing in market filter', async () => {
+    it('throws without fee/tickSpacing or a path in market filter', async () => {
       const provider = createProvider({
         marketAllowlist: [{ assets: [USDC, OP], chainId: CHAIN_ID }],
       })
@@ -122,7 +122,7 @@ describe('UniswapSwapProvider', () => {
           chainId: CHAIN_ID,
           walletAddress: '0xwallet' as Address,
         }),
-      ).rejects.toThrow('fee and tickSpacing must be configured')
+      ).rejects.toThrow('fee and tickSpacing (or a multi-hop path)')
     })
   })
 
