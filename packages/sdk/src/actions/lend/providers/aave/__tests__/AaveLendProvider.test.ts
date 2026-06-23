@@ -398,7 +398,7 @@ describe('AaveLendProvider', () => {
   })
 
   // Independent decode-back oracle (F190): the bytes the user actually signs are
-  // decoded with the local Aave ABIs and every arg is asserted — especially the
+  // decoded with the local Aave ABIs and every arg is asserted, especially the
   // recipient-in-bytes fields (`onBehalfOf`, `to`) and the approval `spender`,
   // which previously had zero coverage. These fail closed: routing aWETH or native
   // ETH to the pool/an attacker instead of the wallet flips an assertion.
@@ -493,13 +493,15 @@ describe('AaveLendProvider', () => {
         number,
       ]
       expect(pool.toLowerCase()).toBe(poolAddress)
-      // onBehalfOf receives the aWETH — must be the wallet, never the pool.
+      // onBehalfOf receives the aWETH: must be the wallet, never the pool.
       expect(onBehalfOf.toLowerCase()).toBe(wallet)
       expect(referralCode).toBe(0)
     })
 
     it('withdrawETH: decodes pool/amount, routes native ETH `to` the wallet, approves the gateway', async () => {
       vi.mocked(aaveSdk.getReserve).mockResolvedValue(createMockWETHReserve())
+      // Arbitrary non-zero aWETH address: only its presence matters (the gateway
+      // needs an aToken to pull), the test never asserts on this value.
       vi.mocked(aaveSdk.getATokenAddress).mockResolvedValue(
         '0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7',
       )
@@ -524,7 +526,7 @@ describe('AaveLendProvider', () => {
       ]
       expect(pool.toLowerCase()).toBe(poolAddress)
       expect(amount).toBe(10n ** 18n)
-      // `to` receives the unwrapped native ETH — the highest-blast-radius field.
+      // `to` receives the unwrapped native ETH: the highest-blast-radius field.
       expect(to.toLowerCase()).toBe(wallet)
 
       // aWETH approval must be granted to the gateway, not the pool/an attacker.

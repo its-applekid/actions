@@ -62,7 +62,7 @@ describe('MorphoLendProvider', () => {
     beforeEach(() => {
       const mockVault = createMockMorphoVault()
 
-      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault as any)
+      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault)
 
       vi.stubGlobal(
         'fetch',
@@ -161,7 +161,7 @@ describe('MorphoLendProvider', () => {
     beforeEach(() => {
       const mockVault = createMockMorphoVault()
 
-      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault as any)
+      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault)
 
       // Mock the fetch API for rewards
       vi.stubGlobal(
@@ -313,8 +313,8 @@ describe('MorphoLendProvider', () => {
   })
 
   // Independent decode-back oracle (F189, F160): the deposit/withdraw bytes are
-  // produced by the real `MetaMorphoAction` and decoded with viem's `erc4626Abi`
-  // — a different ABI than the one that encoded them. A caret-dep regression that
+  // produced by the real `MetaMorphoAction` and decoded with viem's `erc4626Abi`,
+  // a different ABI than the one that encoded them. A caret-dep regression that
   // swapped withdraw's `receiver`/`owner`, or routed assets to an attacker, flips
   // an assertion here instead of round-tripping cleanly.
   describe('signing-path calldata decode', () => {
@@ -326,19 +326,16 @@ describe('MorphoLendProvider', () => {
     }
 
     beforeEach(() => {
-      vi.mocked(fetchAccrualVault).mockResolvedValue(
-        createMockMorphoVault() as any,
-      )
+      vi.mocked(fetchAccrualVault).mockResolvedValue(createMockMorphoVault())
       vi.stubGlobal(
         'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: async () => ({
+        vi.fn().mockImplementation(() =>
+          Response.json({
             data: {
               vaultByAddress: { state: { rewards: [], allocation: [] } },
             },
           }),
-        } as any),
+        ),
       )
     })
 
