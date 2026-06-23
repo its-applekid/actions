@@ -181,13 +181,15 @@ export function validateRecipient(recipient: string | undefined): void {
 }
 
 /**
- * Assert a swap recipient is a valid, correctly-checksummed EVM address before
+ * @description Assert a swap recipient is a valid, correctly-checksummed EVM address before
  * it is encoded into signed calldata. Accepts all-lowercase and no-letter
  * addresses (viem treats these as un-checksummed but valid) while rejecting
  * malformed, truncated, and mis-checksummed (typo'd / address-poisoned)
  * values via `isAddress(..., { strict: true })`. This is the encoder-seam
  * defense-in-depth referenced by F079; it does not replace the upstream
  * `validateRecipient`/ENS resolution.
+ * @param recipient - Resolved recipient address to validate and checksum.
+ * @returns Checksummed recipient address.
  * @throws InvalidRecipientError when the recipient fails strict validation.
  */
 export function assertChecksummedRecipient(recipient: string): Address {

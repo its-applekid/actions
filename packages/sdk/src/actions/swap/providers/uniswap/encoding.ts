@@ -327,13 +327,13 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
 }
 
 /**
- * Recover the recipient encoded in a V4 Universal Router swap's calldata by
+ * @description Recover the recipient encoded in a V4 Universal Router swap's calldata by
  * decoding the TAKE action's params. Used by the wallet guard to verify the
  * signed calldata actually routes output to the executing wallet, not to a
  * destination implied only by trusted metadata.
  * @param swapCalldata - Calldata produced by {@link encodeUniversalRouterSwap}
  * @returns The recipient address baked into the TAKE action
- * @throws InvalidParamsError when the calldata contains no TAKE action
+ * @throws InvalidParamsError when calldata is not a single V4 swap ending in TAKE.
  */
 export function decodeUniversalRouterRecipient(swapCalldata: Hex): Address {
   const { args } = decodeFunctionData({

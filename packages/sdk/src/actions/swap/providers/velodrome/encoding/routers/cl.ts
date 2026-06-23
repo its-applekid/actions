@@ -184,9 +184,10 @@ export function encodeCLSwap(params: EncodeCLSwapParams): Hex {
 }
 
 /**
- * Decode the recipient from Velodrome CL universal-router calldata.
+ * @description Decode the recipient from Velodrome CL universal-router calldata.
  * @param swapCalldata - Encoded Universal Router execute calldata
  * @returns Recipient address from the V3_SWAP_EXACT_IN input payload
+ * @throws InvalidParamsError when calldata is not a single V3_SWAP_EXACT_IN command.
  */
 export function decodeCLSwapRecipient(swapCalldata: Hex): Address {
   const { args } = decodeFunctionData({

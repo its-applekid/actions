@@ -290,7 +290,7 @@ function encodeRouterSwap(
 }
 
 /**
- * Decode the recipient from Velodrome v2, leaf, or universal-router calldata.
+ * @description Decode the recipient from Velodrome v2, leaf, or universal-router calldata.
  * @param swapCalldata - Encoded swap calldata
  * @param routerType - Router variant used for the quote
  * @returns Recipient address baked into the calldata
@@ -314,9 +314,10 @@ export function decodeSwapRecipient(
 }
 
 /**
- * Decode the recipient from a Velodrome universal-router V2 swap.
+ * @description Decode the recipient from a Velodrome universal-router V2 swap.
  * @param swapCalldata - Encoded Universal Router execute calldata
  * @returns Recipient address from the V2_SWAP_EXACT_IN input payload
+ * @throws InvalidParamsError when calldata is not a single V2_SWAP_EXACT_IN command.
  */
 export function decodeUniversalV2SwapRecipient(swapCalldata: Hex): Address {
   const { args } = decodeFunctionData({
@@ -338,10 +339,11 @@ export function decodeUniversalV2SwapRecipient(swapCalldata: Hex): Address {
 }
 
 /**
- * Decode the recipient from Velodrome v2 or leaf router calldata.
+ * @description Decode the recipient from Velodrome v2 or leaf router calldata.
  * @param swapCalldata - Encoded v2 or leaf router calldata
  * @param routerType - Legacy router variant used for the quote
  * @returns Recipient address from the router swap call
+ * @throws InvalidParamsError when calldata is not a supported router swap call.
  */
 export function decodeRouterSwapRecipient(
   swapCalldata: Hex,
