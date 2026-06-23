@@ -136,10 +136,11 @@ describe('LendProvider', () => {
 
     it('should accept asset filtering parameter', async () => {
       const provider = new MockLendProvider()
-      const mockAsset = {
-        metadata: { symbol: 'USDC', name: 'USD Coin' },
+      const mockAsset: Asset = {
+        metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
         address: { 84532: '0x123' as Address },
-      } as any
+        type: 'erc20',
+      }
 
       const markets = await provider.getMarkets({ asset: mockAsset })
       expect(Array.isArray(markets)).toBe(true)
