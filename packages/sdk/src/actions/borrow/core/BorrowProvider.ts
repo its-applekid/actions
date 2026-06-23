@@ -322,7 +322,7 @@ export abstract class BorrowProvider<
     return results.flatMap((result, i) => {
       if (result.status === 'fulfilled') return result.value
       const market = markets[i]
-      console.error(
+      globalThis.console.error(
         `Failed to read borrow market ${market.marketId} on chain ${market.chainId}:`,
         result.reason,
       )

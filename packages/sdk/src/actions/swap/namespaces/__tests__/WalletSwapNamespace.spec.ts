@@ -243,7 +243,7 @@ describe('WalletSwapNamespace', () => {
       const wallet = createMockWallet()
       const namespace = new WalletSwapNamespace({ uniswap: provider }, wallet)
 
-      // Get quote without wallet (simulates ActionsSwapNamespace quote — recipient
+      // Get quote without wallet (simulates ActionsSwapNamespace quote, recipient
       // defaults to UNIVERSAL_ROUTER_MSG_SENDER, not the executing wallet)
       const quote = await provider.getQuote({
         assetIn: USDC,
@@ -299,7 +299,7 @@ describe('WalletSwapNamespace', () => {
 
       const result = await namespace.execute(quote)
       expect(result.price).toBeDefined()
-      // Single getQuote call — no re-quote, no re-encode.
+      // Single getQuote call, no re-quote, no re-encode.
       expect(provider.mockGetQuote).toHaveBeenCalledTimes(1)
     })
 

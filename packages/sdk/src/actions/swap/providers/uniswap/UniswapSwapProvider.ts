@@ -184,7 +184,7 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       execution: {
         swapCalldata,
         routerAddress: addresses.universalRouter,
-        value: isNativeAsset(assetIn) ? (amountInRaw ?? 0n) : 0n,
+        value: isNativeAsset(assetIn) ? finalAmountInRaw : 0n,
         providerContext: {
           fee: marketConfig.fee,
           tickSpacing: marketConfig.tickSpacing,

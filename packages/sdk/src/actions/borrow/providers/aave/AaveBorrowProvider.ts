@@ -152,7 +152,7 @@ export class AaveBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
 
   /**
    * Narrow a trusted market config to the Aave variant and resolve its chain
-   * client in one step — the two-line prelude every read/write hook shares.
+   * client in one step, the two-line prelude every read/write hook shares.
    */
   private resolveAaveContext(rawMarket: BorrowMarketConfig): {
     market: AaveBorrowMarketConfig

@@ -154,6 +154,36 @@ describe('assertVelodromeQuoteBound', () => {
         assertVelodromeQuoteBound(velodromeQuote(BASE_SEPOLIA, data)),
       ).toThrow(QuoteCalldataMismatchError)
     })
+
+    it('rejects universal calldata with a hidden extra route hop', () => {
+      const route = encodePacked(
+        ['address', 'bool', 'address', 'bool', 'address'],
+        [
+          MockUSDCAsset.address[BASE_SEPOLIA] as Address,
+          false,
+          MockWETHAsset.address[BASE_SEPOLIA] as Address,
+          false,
+          ATTACKER,
+        ],
+      )
+      const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
+        '0x0000000000000000000000000000000000000001',
+        1_000_000n,
+        398_000_000_000_000_000n,
+        route,
+        true,
+        false,
+      ])
+      const data = encodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        functionName: 'execute',
+        args: ['0x08', [input], 9_999_999_999n],
+      })
+
+      expect(() =>
+        assertVelodromeQuoteBound(velodromeQuote(BASE_SEPOLIA, data)),
+      ).toThrow(QuoteCalldataMismatchError)
+    })
   })
 
   it('rejects calldata that is not a recognized Velodrome swap', () => {

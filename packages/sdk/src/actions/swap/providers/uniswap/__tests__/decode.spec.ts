@@ -82,6 +82,26 @@ describe('assertUniswapV4QuoteBound', () => {
     expect(() => assertUniswapV4QuoteBound(uniswapQuote())).not.toThrow()
   })
 
+  it('accepts exact-output calldata whose take amount is the quoted output amount', () => {
+    const exactOutput = encodeUniversalRouterSwap({
+      amountOutRaw: 500_000_000_000_000_000n,
+      assetIn: MockUSDCAsset,
+      assetOut: MockWETHAsset,
+      slippage: 0.005,
+      deadline: 9_999_999_999,
+      recipient: WALLET,
+      chainId: CHAIN,
+      quote: priceFixture(),
+      universalRouterAddress: ROUTER,
+      fee: 500,
+      tickSpacing: 10,
+    })
+
+    expect(() =>
+      assertUniswapV4QuoteBound(uniswapQuote({ calldata: exactOutput })),
+    ).not.toThrow()
+  })
+
   it('rejects calldata that reverses the swap direction (sells the wrong token)', () => {
     // Real V4 calldata for WETH->USDC (same pool, opposite direction), but the
     // quote metadata claims USDC->WETH. Sorted poolKey is identical; only

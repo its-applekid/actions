@@ -2,7 +2,7 @@ import type { Address, PublicClient } from 'viem'
 import { baseSepolia } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
-import { MockWETHAsset } from '@/__mocks__/MockAssets.js'
+import { MockETHAsset, MockWETHAsset } from '@/__mocks__/MockAssets.js'
 import type { UniswapSwapProviderConfig } from '@/actions/swap/providers/uniswap/types.js'
 import { UniswapSwapProvider } from '@/actions/swap/providers/uniswap/UniswapSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
@@ -154,6 +154,28 @@ describe('UniswapSwapProvider', () => {
 
       // 1 USDC = 1000000 (6 decimals)
       expect(quote.amountInRaw).toBe(1000000n)
+    })
+
+    it('sets native exact-output value to the quoted input amount', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          {
+            assets: [MockETHAsset, OP],
+            fee: 100,
+            tickSpacing: 2,
+            chainId: CHAIN_ID,
+          },
+        ],
+      })
+
+      const quote = await provider.getQuote({
+        assetIn: MockETHAsset,
+        assetOut: OP,
+        amountOut: 1,
+        chainId: CHAIN_ID,
+      })
+
+      expect(quote.execution.value).toBe(quote.amountInRaw)
     })
   })
 

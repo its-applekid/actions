@@ -1,6 +1,7 @@
 import type { Address } from 'viem'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { InvalidParamsError } from '@/core/error/errors.js'
 import type { TransactionData } from '@/types/transaction.js'
 import { executeTransactionBatch } from '@/wallet/core/utils/executeTransactionBatch.js'
 import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
@@ -29,7 +30,7 @@ describe('executeTransactionBatch', () => {
 
   it('throws when the transaction list is empty', async () => {
     await expect(executeTransactionBatch(wallet, [], CHAIN_ID)).rejects.toThrow(
-      /empty/,
+      InvalidParamsError,
     )
   })
 

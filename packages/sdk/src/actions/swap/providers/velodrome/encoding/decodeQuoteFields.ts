@@ -96,6 +96,15 @@ function assertPackedRoute(
   route: Hex,
   tokenOutOffset: number,
 ): void {
+  const expectedLength = tokenOutOffset + 20
+  const actualLength = (route.length - 2) / 2
+  if (actualLength !== expectedLength) {
+    throw new QuoteCalldataMismatchError({
+      field: 'route',
+      expected: `${expectedLength} bytes`,
+      received: `${actualLength} bytes`,
+    })
+  }
   const { tokenIn, tokenOut } = resolveTokens(
     quote.assetIn,
     quote.assetOut,

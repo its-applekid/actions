@@ -252,7 +252,7 @@ function isBorrowQuote<TParams extends { market: unknown }>(
   params: TParams | BorrowQuote,
 ): params is BorrowQuote {
   // Multi-field guard so raw params that happen to carry a `quotedAt`
-  // field don't pose as a pre-built quote — see the "re-quotes raw params
+  // field don't pose as a pre-built quote, see the "re-quotes raw params
   // that happen to include quotedAt" regression test.
   return (
     QUOTE_DISCRIMINATOR in params &&

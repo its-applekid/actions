@@ -30,7 +30,8 @@ export function assertUniswapQuoteFields(
     : maxInputWithSlippage(quote)
   assertSwapAmounts(quote, swapParams, isExactIn, expectedInput)
   assertCurrencyAmount('settle', settleParam, tokenIn, expectedInput)
-  assertCurrencyAmount('take', takeParam, tokenOut, quote.amountOutMinRaw)
+  const expectedOutput = isExactIn ? quote.amountOutMinRaw : quote.amountOutRaw
+  assertCurrencyAmount('take', takeParam, tokenOut, expectedOutput)
 }
 
 function currencyAddress(
