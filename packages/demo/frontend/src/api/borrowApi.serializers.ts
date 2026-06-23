@@ -11,6 +11,7 @@ import type {
   BorrowMarketPosition,
   BorrowQuote,
   BorrowReceipt,
+  TransactionData,
 } from '@eth-optimism/actions-sdk'
 
 import type { Serialized } from '../util/serialize.js'
@@ -70,6 +71,7 @@ export function deserializeQuote(q: Serialized<BorrowQuote>): BorrowQuote {
       q.borrowAmountRaw != null ? BigInt(q.borrowAmountRaw) : undefined,
     collateralAmountRaw:
       q.collateralAmountRaw != null ? BigInt(q.collateralAmountRaw) : undefined,
+    execution: deserializeQuoteExecution(q.execution),
     gasEstimate: q.gasEstimate != null ? BigInt(q.gasEstimate) : undefined,
   }
 }
@@ -100,4 +102,35 @@ export function marketIdPath(marketId: BorrowMarketId): string {
  */
 export function isEmptyPosition(p: BorrowMarketPosition): boolean {
   return p.collateralShares === 0n && p.borrowAmount === 0n
+}
+
+type SerializedBorrowTransaction =
+  Serialized<BorrowQuote>['execution']['transactions'][number]
+
+function deserializeQuoteExecution(
+  execution: Serialized<BorrowQuote>['execution'],
+): BorrowQuote['execution'] {
+  return {
+    ...execution,
+    transactions: execution.transactions.map(deserializeTransaction),
+    providerContext: deserializeProviderContext(execution.providerContext),
+  }
+}
+
+function deserializeTransaction(
+  transaction: SerializedBorrowTransaction,
+): TransactionData {
+  return {
+    ...transaction,
+    value: BigInt(transaction.value),
+  }
+}
+
+function deserializeProviderContext(
+  context: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!context) return undefined
+  const repaySharesRaw = context.repaySharesRaw
+  if (typeof repaySharesRaw !== 'string') return context
+  return { ...context, repaySharesRaw: BigInt(repaySharesRaw) }
 }

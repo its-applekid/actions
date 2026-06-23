@@ -24,6 +24,7 @@ export interface AssembleBorrowQuoteArgs {
   quoteAmounts: QuoteAmounts
   transactions: TransactionData[]
   approvalsSkipped: boolean
+  providerContext?: Record<string, unknown>
   healthBufferPct: number
   quoteExpirationSeconds: number
 }
@@ -55,6 +56,9 @@ export function assembleBorrowQuote(
     execution: {
       transactions: args.transactions,
       approvalsSkipped: args.approvalsSkipped,
+      ...(args.providerContext
+        ? { providerContext: args.providerContext }
+        : {}),
     },
     provider: args.provider,
     quotedAt: now,

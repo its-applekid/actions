@@ -64,7 +64,15 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
    * Router swap of the quoted pair rather than decoding a recipient field.
    */
   protected assertSwapCalldataBound(quote: SwapQuote): void {
-    assertUniswapV4QuoteBound(quote)
+    const market = this.resolveUniswapConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    assertUniswapV4QuoteBound(quote, {
+      fee: market.fee,
+      tickSpacing: market.tickSpacing,
+    })
   }
 
   protected async _execute(

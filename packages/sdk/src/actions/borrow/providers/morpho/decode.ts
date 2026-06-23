@@ -14,36 +14,57 @@ import type {
   BorrowAction,
   BorrowQuote,
   MorphoBorrowMarketConfig,
+  MorphoMarketParams,
 } from '@/types/borrow/index.js'
 import type { TransactionData } from '@/types/transaction.js'
+
+const MORPHO_OPERATIONS = [
+  'supplyCollateral',
+  'borrow',
+  'repay',
+  'withdrawCollateral',
+] as const
+
+type MorphoOperation = (typeof MORPHO_OPERATIONS)[number]
+type MorphoTransactionKind = MorphoOperation | 'approval'
+type MorphoSummary = Record<MorphoOperation, number>
 
 export function assertMorphoQuoteExecution(
   quote: BorrowQuote,
   market: MorphoBorrowMarketConfig,
   walletAddress: Address,
 ): void {
+  const summary = emptySummary()
   for (const transaction of quote.execution.transactions) {
-    assertMorphoTransaction(transaction, quote, market, walletAddress)
+    const kind = classifyMorphoTransaction(
+      transaction,
+      quote,
+      market,
+      walletAddress,
+    )
+    if (kind !== 'approval') summary[kind] += 1
   }
+  assertMorphoBundleShape(quote, summary)
 }
 
-function assertMorphoTransaction(
+function classifyMorphoTransaction(
   transaction: TransactionData,
   quote: BorrowQuote,
   market: MorphoBorrowMarketConfig,
   walletAddress: Address,
-): void {
-  if (isMorphoCall(transaction, quote, market, walletAddress)) return
-  if (isApprovalCall(transaction, quote.action, market)) return
+): MorphoTransactionKind {
+  const morpho = classifyMorphoCall(transaction, quote, market, walletAddress)
+  if (morpho) return morpho
+  if (isApprovalCall(transaction, quote.action, market)) return 'approval'
   failCalldata('transaction', { received: transaction.to })
 }
 
-function isMorphoCall(
+function classifyMorphoCall(
   transaction: TransactionData,
   quote: BorrowQuote,
   market: MorphoBorrowMarketConfig,
   walletAddress: Address,
-): boolean {
+): MorphoOperation | undefined {
   try {
     const decoded = decodeFunctionData({ abi: blueAbi, data: transaction.data })
     assertAddressField(
@@ -54,66 +75,83 @@ function isMorphoCall(
     assertAmountField('value', transaction.value, 0n)
     switch (decoded.functionName) {
       case 'supplyCollateral':
-        assertBorrowAction(
-          quote.action,
-          ['open', 'depositCollateral'],
-          decoded.functionName,
-        )
-        assertMorphoMarketParams(decoded.args[0], market.marketParams)
-        assertAmountField(
-          'collateral amount',
-          decoded.args[1],
-          quote.collateralAmountRaw,
-        )
-        assertAddressField('onBehalf', decoded.args[2], walletAddress)
-        return true
+        assertSupplyCollateral(quote, market, walletAddress, decoded.args)
+        return 'supplyCollateral'
       case 'borrow':
-        assertBorrowAction(quote.action, ['open'], decoded.functionName)
-        assertMorphoMarketParams(decoded.args[0], market.marketParams)
-        assertAmountField(
-          'borrow amount',
-          decoded.args[1],
-          quote.borrowAmountRaw,
-        )
-        assertAddressField('onBehalf', decoded.args[3], walletAddress)
-        assertAddressField('receiver', decoded.args[4], walletAddress)
-        return true
+        assertBorrow(quote, market, walletAddress, decoded.args)
+        return 'borrow'
       case 'repay':
-        assertBorrowAction(
-          quote.action,
-          ['repay', 'close'],
-          decoded.functionName,
-        )
-        assertMorphoMarketParams(decoded.args[0], market.marketParams)
-        assertRepayAmount(
-          decoded.args[1],
-          decoded.args[2],
-          quote.borrowAmountRaw,
-        )
-        assertAddressField('onBehalf', decoded.args[3], walletAddress)
-        return true
+        assertRepay(quote, market, walletAddress, decoded.args)
+        return 'repay'
       case 'withdrawCollateral':
-        assertBorrowAction(
-          quote.action,
-          ['withdrawCollateral', 'close'],
-          decoded.functionName,
-        )
-        assertMorphoMarketParams(decoded.args[0], market.marketParams)
-        assertAmountField(
-          'collateral amount',
-          decoded.args[1],
-          quote.collateralAmountRaw,
-        )
-        assertAddressField('onBehalf', decoded.args[2], walletAddress)
-        assertAddressField('receiver', decoded.args[3], walletAddress)
-        return true
+        assertWithdrawCollateral(quote, market, walletAddress, decoded.args)
+        return 'withdrawCollateral'
       default:
-        return false
+        return undefined
     }
   } catch (error) {
     if (error instanceof QuoteCalldataMismatchError) throw error
-    return false
+    return undefined
   }
+}
+
+function assertSupplyCollateral(
+  quote: BorrowQuote,
+  market: MorphoBorrowMarketConfig,
+  walletAddress: Address,
+  args: readonly [MorphoMarketParams, bigint, Address, `0x${string}`],
+): void {
+  assertBorrowAction(
+    quote.action,
+    ['open', 'depositCollateral'],
+    'supplyCollateral',
+  )
+  assertMorphoMarketParams(args[0], market.marketParams)
+  assertAmountField('collateral amount', args[1], quote.collateralAmountRaw)
+  assertAddressField('onBehalf', args[2], walletAddress)
+}
+
+function assertBorrow(
+  quote: BorrowQuote,
+  market: MorphoBorrowMarketConfig,
+  walletAddress: Address,
+  args: readonly [MorphoMarketParams, bigint, bigint, Address, Address],
+): void {
+  assertBorrowAction(quote.action, ['open'], 'borrow')
+  assertMorphoMarketParams(args[0], market.marketParams)
+  assertAmountField('borrow amount', args[1], quote.borrowAmountRaw)
+  assertAmountField('borrow shares', args[2], 0n)
+  assertAddressField('onBehalf', args[3], walletAddress)
+  assertAddressField('receiver', args[4], walletAddress)
+}
+
+function assertRepay(
+  quote: BorrowQuote,
+  market: MorphoBorrowMarketConfig,
+  walletAddress: Address,
+  args: readonly [MorphoMarketParams, bigint, bigint, Address, `0x${string}`],
+): void {
+  assertBorrowAction(quote.action, ['repay', 'close'], 'repay')
+  assertMorphoMarketParams(args[0], market.marketParams)
+  assertRepayAmount(args[1], args[2], quote)
+  assertAddressField('onBehalf', args[3], walletAddress)
+}
+
+function assertWithdrawCollateral(
+  quote: BorrowQuote,
+  market: MorphoBorrowMarketConfig,
+  walletAddress: Address,
+  args: readonly [MorphoMarketParams, bigint, Address, Address],
+): void {
+  assertBorrowAction(
+    quote.action,
+    ['withdrawCollateral', 'close'],
+    'withdrawCollateral',
+  )
+  assertMorphoMarketParams(args[0], market.marketParams)
+  assertAmountField('collateral amount', args[1], quote.collateralAmountRaw)
+  assertAddressField('onBehalf', args[2], walletAddress)
+  assertAddressField('receiver', args[3], walletAddress)
 }
 
 function isApprovalCall(
@@ -159,8 +197,67 @@ function assertApprovalToken(
 function assertRepayAmount(
   assets: bigint,
   shares: bigint,
-  expectedAssets: bigint | undefined,
+  quote: BorrowQuote,
 ): void {
-  if (assets === 0n && shares > 0n) return
-  assertAmountField('repay amount', assets, expectedAssets)
+  if (shares === 0n) {
+    assertAmountField('repay amount', assets, quote.borrowAmountRaw)
+    return
+  }
+  assertAmountField('repay amount', assets, 0n)
+  assertAmountField('repay shares', shares, expectedRepayShares(quote))
+}
+
+function expectedRepayShares(quote: BorrowQuote): bigint | undefined {
+  const value = quote.execution.providerContext?.repaySharesRaw
+  return typeof value === 'bigint' ? value : undefined
+}
+
+function assertMorphoBundleShape(
+  quote: BorrowQuote,
+  actual: MorphoSummary,
+): void {
+  const expected = expectedMorphoSummary(quote)
+  for (const operation of MORPHO_OPERATIONS) {
+    assertCount(
+      `transaction.${operation}`,
+      actual[operation],
+      expected[operation],
+    )
+  }
+}
+
+function expectedMorphoSummary(quote: BorrowQuote): MorphoSummary {
+  const expected = emptySummary()
+  const hasCollateral = (quote.collateralAmountRaw ?? 0n) > 0n
+  if (quote.action === 'open') {
+    expected.borrow = 1
+    if (hasCollateral) expected.supplyCollateral = 1
+  } else if (quote.action === 'depositCollateral') {
+    expected.supplyCollateral = 1
+  } else if (quote.action === 'withdrawCollateral') {
+    expected.withdrawCollateral = 1
+  } else if (quote.action === 'repay') {
+    expected.repay = 1
+  } else {
+    expected.repay = 1
+    if (hasCollateral) expected.withdrawCollateral = 1
+  }
+  return expected
+}
+
+function emptySummary(): MorphoSummary {
+  return {
+    supplyCollateral: 0,
+    borrow: 0,
+    repay: 0,
+    withdrawCollateral: 0,
+  }
+}
+
+function assertCount(field: string, actual: number, expected: number): void {
+  if (actual === expected) return
+  failCalldata(field, {
+    expected: String(expected),
+    received: String(actual),
+  })
 }

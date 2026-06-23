@@ -7,12 +7,24 @@ import type { SwapQuote } from '@/types/swap/index.js'
 import { getAssetAddress, isNativeAsset } from '@/utils/assets.js'
 
 export interface UniswapSwapParams {
-  poolKey: { currency0: Address; currency1: Address }
+  poolKey: {
+    currency0: Address
+    currency1: Address
+    fee: number
+    tickSpacing: number
+    hooks: Address
+  }
   zeroForOne: boolean
   amountIn?: bigint
   amountOut?: bigint
   amountOutMinimum?: bigint
   amountInMaximum?: bigint
+}
+
+export interface ExpectedUniswapPool {
+  fee: number
+  tickSpacing: number
+  hooks?: Address
 }
 
 export function assertUniswapQuoteFields(
@@ -21,10 +33,11 @@ export function assertUniswapQuoteFields(
   isExactIn: boolean,
   settleParam: Hex,
   takeParam: Hex,
+  expectedPool: ExpectedUniswapPool,
 ): void {
   const tokenIn = currencyAddress(quote.assetIn, quote.chainId)
   const tokenOut = currencyAddress(quote.assetOut, quote.chainId)
-  assertPoolMatchesQuote(tokenIn, tokenOut, swapParams)
+  assertPoolMatchesQuote(tokenIn, tokenOut, swapParams, expectedPool)
   const expectedInput = isExactIn
     ? quote.amountInRaw
     : maxInputWithSlippage(quote)
@@ -90,6 +103,7 @@ function assertPoolMatchesQuote(
   tokenIn: Address,
   tokenOut: Address,
   swapParams: UniswapSwapParams,
+  expectedPool: ExpectedUniswapPool,
 ): void {
   const [expected0, expected1] =
     tokenIn.toLowerCase() < tokenOut.toLowerCase()
@@ -97,6 +111,17 @@ function assertPoolMatchesQuote(
       : [tokenOut, tokenIn]
   assertAddress('poolKey currency0', swapParams.poolKey.currency0, expected0)
   assertAddress('poolKey currency1', swapParams.poolKey.currency1, expected1)
+  assertNumber('poolKey fee', swapParams.poolKey.fee, expectedPool.fee)
+  assertNumber(
+    'poolKey tickSpacing',
+    swapParams.poolKey.tickSpacing,
+    expectedPool.tickSpacing,
+  )
+  assertAddress(
+    'poolKey hooks',
+    swapParams.poolKey.hooks,
+    expectedPool.hooks ?? zeroAddress,
+  )
   const expectedZeroForOne = isAddressEqual(
     tokenIn,
     swapParams.poolKey.currency0,
@@ -107,6 +132,15 @@ function assertPoolMatchesQuote(
     expected: String(expectedZeroForOne),
     received: String(swapParams.zeroForOne),
     detail: 'swap direction does not match the quoted input asset',
+  })
+}
+
+function assertNumber(field: string, actual: number, expected: number): void {
+  if (actual === expected) return
+  throw new QuoteCalldataMismatchError({
+    field,
+    expected: String(expected),
+    received: String(actual),
   })
 }
 

@@ -93,6 +93,7 @@ export function assembleMorphoBorrowQuote(args: {
   transactions: TransactionData[]
   quoteAmounts: QuoteAmounts
   approvalsSkipped: boolean
+  providerContext?: Record<string, unknown>
   recipient: Address
   quoteExpirationSeconds: number
   healthBufferPct: number
@@ -110,6 +111,7 @@ export function assembleMorphoBorrowQuote(args: {
     quoteAmounts: args.quoteAmounts,
     transactions: args.transactions,
     approvalsSkipped: args.approvalsSkipped,
+    providerContext: args.providerContext,
     healthBufferPct: args.healthBufferPct,
     quoteExpirationSeconds: args.quoteExpirationSeconds,
   })

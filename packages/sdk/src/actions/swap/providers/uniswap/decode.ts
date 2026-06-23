@@ -8,6 +8,7 @@ import {
 } from '@/actions/swap/providers/uniswap/abis.js'
 import {
   assertUniswapQuoteFields,
+  type ExpectedUniswapPool,
   type UniswapSwapParams,
 } from '@/actions/swap/providers/uniswap/decodeQuoteFields.js'
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
@@ -45,7 +46,10 @@ const V4_EXACT_OUT_ACTIONS = '0x080c0f'
  * @throws QuoteCalldataMismatchError when the bytes are not a canonical V4 swap
  * of the quoted pair.
  */
-export function assertUniswapV4QuoteBound(quote: SwapQuote): void {
+export function assertUniswapV4QuoteBound(
+  quote: SwapQuote,
+  expectedPool: ExpectedUniswapPool,
+): void {
   const decoded = tryDecodeExecute(quote.execution.swapCalldata)
   if (!decoded) {
     throw new QuoteCalldataMismatchError({
@@ -53,7 +57,8 @@ export function assertUniswapV4QuoteBound(quote: SwapQuote): void {
       detail: 'not a Uniswap Universal Router execute() call',
     })
   }
-  const [commands, inputs] = decoded
+  const { commands, inputs, deadline } = decoded
+  assertDeadline(quote, deadline)
 
   if (commands.toLowerCase() !== V4_SWAP_COMMAND) {
     throw new QuoteCalldataMismatchError({
@@ -91,20 +96,41 @@ export function assertUniswapV4QuoteBound(quote: SwapQuote): void {
   }
 
   const swapParams = decodeSwapParams(params[0], isExactIn)
-  assertUniswapQuoteFields(quote, swapParams, isExactIn, params[1], params[2])
+  assertUniswapQuoteFields(
+    quote,
+    swapParams,
+    isExactIn,
+    params[1],
+    params[2],
+    expectedPool,
+  )
 }
 
 /** Decode `execute(bytes commands, bytes[] inputs, uint256 deadline)`, or `undefined` if the bytes are not that call. */
 function tryDecodeExecute(
   data: SwapQuote['execution']['swapCalldata'],
-): readonly [Hex, readonly Hex[]] | undefined {
+): { commands: Hex; inputs: readonly Hex[]; deadline: bigint } | undefined {
   try {
     const decoded = decodeFunctionData({ abi: UNIVERSAL_ROUTER_ABI, data })
     if (decoded.functionName !== 'execute') return undefined
-    return [decoded.args[0], decoded.args[1]]
+    return {
+      commands: decoded.args[0],
+      inputs: decoded.args[1],
+      deadline: decoded.args[2],
+    }
   } catch {
     return undefined
   }
+}
+
+function assertDeadline(quote: SwapQuote, actual: bigint): void {
+  const expected = BigInt(quote.deadline)
+  if (actual === expected) return
+  throw new QuoteCalldataMismatchError({
+    field: 'deadline',
+    expected: expected.toString(),
+    received: actual.toString(),
+  })
 }
 
 function decodeV4SwapInput(input: Hex): {

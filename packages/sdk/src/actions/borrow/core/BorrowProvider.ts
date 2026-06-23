@@ -12,6 +12,7 @@ import { requireAllowlistedBorrowMarketConfig } from '@/actions/borrow/core/vali
 import { BaseActionProvider } from '@/actions/shared/BaseActionProvider.js'
 import { DEFAULT_QUOTE_EXPIRATION_SECONDS } from '@/actions/shared/defaults.js'
 import { filterMatchingConfigs } from '@/actions/shared/marketConfigs.js'
+import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { BorrowProviderConfig, BorrowSettings } from '@/types/actions.js'
 import type {
@@ -263,6 +264,7 @@ export abstract class BorrowProvider<
    * the wallet will sign.
    * @param quote - Borrow quote to reconcile against its calldata bundle.
    * @param walletAddress - Wallet that will sign and execute the bundle.
+   * @returns Nothing when the bundle is bound to the quote.
    * @throws MarketNotAllowedError when the market is not configured or is blocked.
    * @throws QuoteCalldataMismatchError when transaction bytes diverge from metadata.
    */
@@ -331,6 +333,29 @@ export abstract class BorrowProvider<
   }
 
   /**
+   * Decode and reconcile provider-specific borrow transaction bytes.
+   * @description Defaults to fail-closed so existing external subclasses keep
+   * compiling on patch releases but cannot execute pre-built quotes until they
+   * implement calldata binding.
+   * @param quote - Borrow quote whose transaction bundle is about to be signed.
+   * @param _market - Trusted market config resolved from this provider's allowlist.
+   * @param _walletAddress - Wallet that will sign and execute the bundle.
+   * @returns Nothing when calldata is bound to the quote.
+   * @throws QuoteCalldataMismatchError when the provider has not opted into
+   * pre-built quote execution.
+   */
+  protected _validateQuoteExecution(
+    quote: BorrowQuote,
+    _market: BorrowMarketConfig,
+    _walletAddress: Address,
+  ): void {
+    throw new QuoteCalldataMismatchError({
+      field: 'transactions',
+      detail: `${quote.provider} must implement _validateQuoteExecution`,
+    })
+  }
+
+  /**
    * Resolve a `BorrowMarketId` to its trusted `BorrowMarketConfig` from
    * the provider allowlist; throws `MarketNotAllowedError` when missing
    * or when the marketId is on the blocklist.
@@ -388,12 +413,6 @@ export abstract class BorrowProvider<
   protected abstract _repay(
     params: BorrowRepayInternalParams,
   ): Promise<BorrowQuote>
-
-  protected abstract _validateQuoteExecution(
-    quote: BorrowQuote,
-    market: BorrowMarketConfig,
-    walletAddress: Address,
-  ): void
 
   // ─────────────────────────────────────────────────────────────────────────
   // Abstract read hooks

@@ -429,6 +429,48 @@ export abstract class SwapProvider<
     }
   }
 
+  /**
+   * The canonical router address this provider sends swaps to on a chain,
+   * derived from static per-chain config (no RPC). Used to bind a pre-built
+   * quote's `execution.routerAddress` before signing.
+   * @description Defaults to fail-closed so existing external subclasses keep
+   * compiling on patch releases but cannot execute pre-built quotes until they
+   * implement router binding.
+   * @param chainId - Chain the pre-built quote targets.
+   * @returns Canonical router address for this provider on the chain.
+   * @throws QuoteCalldataMismatchError when the provider has not opted into
+   * pre-built quote execution.
+   */
+  protected canonicalRouterAddress(chainId: SupportedChainId): Address {
+    throw new QuoteCalldataMismatchError({
+      field: 'routerAddress',
+      received: String(chainId),
+      detail: 'provider must implement canonicalRouterAddress',
+    })
+  }
+
+  /**
+   * Decode `quote.execution.swapCalldata` and assert it routes the swap output
+   * to the executing wallet (`quote.recipient`, already bound to the wallet by
+   * the namespace). Implementations decode per router/version and throw
+   * `QuoteCalldataMismatchError` on any divergence. Routes that structurally
+   * settle to `msg.sender` (Uniswap V4, Velodrome universal/CL) assert the
+   * canonical shape / sentinel so the executing wallet is the recipient.
+   * @description Defaults to fail-closed so existing external subclasses keep
+   * compiling on patch releases but cannot execute pre-built quotes until they
+   * implement calldata binding.
+   * @param quote - Pre-built swap quote whose calldata is about to be signed.
+   * @returns Nothing when calldata is bound to the quote.
+   * @throws QuoteCalldataMismatchError when the provider has not opted into
+   * pre-built quote execution.
+   */
+  protected assertSwapCalldataBound(quote: SwapQuote): void {
+    throw new QuoteCalldataMismatchError({
+      field: 'swapCalldata',
+      detail: `${quote.provider} must implement assertSwapCalldataBound`,
+    })
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────────
@@ -616,21 +658,4 @@ export abstract class SwapProvider<
   protected abstract _getMarkets(
     params: GetSwapMarketsParams,
   ): Promise<SwapMarket[]>
-
-  /**
-   * The canonical router address this provider sends swaps to on a chain,
-   * derived from static per-chain config (no RPC). Used to bind a pre-built
-   * quote's `execution.routerAddress` before signing.
-   */
-  protected abstract canonicalRouterAddress(chainId: SupportedChainId): Address
-
-  /**
-   * Decode `quote.execution.swapCalldata` and assert it routes the swap output
-   * to the executing wallet (`quote.recipient`, already bound to the wallet by
-   * the namespace). Implementations decode per router/version and throw
-   * `QuoteCalldataMismatchError` on any divergence. Routes that structurally
-   * settle to `msg.sender` (Uniswap V4, Velodrome universal/CL) assert the
-   * canonical shape / sentinel so the executing wallet is the recipient.
-   */
-  protected abstract assertSwapCalldataBound(quote: SwapQuote): void
 }

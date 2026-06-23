@@ -183,6 +183,7 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
               : undefined,
         },
         approvalsSkipped: approvalTx === undefined,
+        providerContext: repaySharesContext(plan.repay.repaySharesWei),
       },
       params.walletAddress,
     )
@@ -316,6 +317,7 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
               : repay.repayAssetsWei,
         },
         approvalsSkipped: approvalTx === undefined,
+        providerContext: repaySharesContext(repay.repaySharesWei),
       },
       params.walletAddress,
     )
@@ -381,6 +383,13 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
   }
 }
 
+function repaySharesContext(
+  repaySharesRaw: bigint,
+): Record<string, unknown> | undefined {
+  if (repaySharesRaw === 0n) return undefined
+  return { repaySharesRaw }
+}
+
 interface AssembleMorphoQuoteArgs {
   action: BorrowAction
   market: MorphoBorrowMarketConfig
@@ -389,6 +398,7 @@ interface AssembleMorphoQuoteArgs {
   transactions: TransactionData[]
   quoteAmounts: QuoteAmounts
   approvalsSkipped: boolean
+  providerContext?: Record<string, unknown>
 }
 
 export type { MarketId, MorphoMarketParams }

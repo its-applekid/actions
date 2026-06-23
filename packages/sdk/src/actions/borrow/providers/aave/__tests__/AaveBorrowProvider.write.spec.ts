@@ -16,7 +16,11 @@ import {
 import { AaveBorrowProvider } from '@/actions/borrow/providers/aave/AaveBorrowProvider.js'
 import { computeAaveBorrowMarketId } from '@/actions/borrow/providers/aave/marketId.js'
 import { POOL_ABI, WETH_GATEWAY_ABI } from '@/actions/shared/aave/abis/pool.js'
-import { EmptyPositionError, InvalidParamsError } from '@/core/error/errors.js'
+import {
+  EmptyPositionError,
+  InvalidParamsError,
+  QuoteCalldataMismatchError,
+} from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { Asset } from '@/types/asset.js'
 import type { AaveBorrowMarketConfig } from '@/types/borrow/index.js'
@@ -198,6 +202,54 @@ describe('AaveBorrowProvider write layer', () => {
       }).functionName,
     ).toBe('borrow')
     expect(quote.collateralAmountRaw).toBe(5n * 10n ** 17n)
+  })
+
+  it('rejects a pre-built quote with a duplicated borrow leg', async () => {
+    const provider = makeProvider({ collateral: 0n, debt: 0n, allowance: 0n })
+    const quote = await provider.openPosition({
+      market,
+      walletAddress: WALLET,
+      collateralAmount: { amountRaw: 5n * 10n ** 17n },
+      borrowAmount: { amountRaw: 1_000_000_000n },
+    })
+    const borrow = quote.execution.transactions[1]
+    if (!borrow) throw new Error('expected borrow transaction')
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: {
+            ...quote.execution,
+            transactions: [...quote.execution.transactions, borrow],
+          },
+        },
+        WALLET,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
+  })
+
+  it('rejects a pre-built quote missing its borrow leg', async () => {
+    const provider = makeProvider({
+      collateral: 10n ** 18n,
+      debt: 0n,
+      allowance: 0n,
+    })
+    const quote = await provider.openPosition({
+      market,
+      walletAddress: WALLET,
+      borrowAmount: { amountRaw: 1_000_000_000n },
+    })
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: { ...quote.execution, transactions: [] },
+        },
+        WALLET,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
   })
 
   it('rejects a max-amount depositCollateral with InvalidParamsError', async () => {

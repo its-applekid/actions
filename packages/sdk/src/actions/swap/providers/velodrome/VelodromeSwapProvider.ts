@@ -76,7 +76,16 @@ export class VelodromeSwapProvider extends SwapProvider<VelodromeSwapProviderCon
    * actual calldata shape and asserts the executing wallet is the recipient.
    */
   protected assertSwapCalldataBound(quote: SwapQuote): void {
-    assertVelodromeQuoteBound(quote)
+    const pool = this.resolveVelodromeMarketConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    assertVelodromeQuoteBound(
+      quote,
+      pool,
+      getChainConfig(quote.chainId).contracts.poolFactory,
+    )
   }
 
   /**

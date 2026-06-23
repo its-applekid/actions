@@ -14,11 +14,13 @@ import {
   market,
   otherMarket,
 } from '@/actions/borrow/__tests__/fixtures.js'
+import { encodeMorphoRepay } from '@/actions/borrow/providers/morpho/blue.js'
 import { MorphoBorrowProvider } from '@/actions/borrow/providers/morpho/MorphoBorrowProvider.js'
 import {
   BorrowMarketParamsMismatchError,
   EmptyPositionError,
   MarketNotAllowedError,
+  QuoteCalldataMismatchError,
 } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { MorphoBorrowMarketConfig } from '@/types/borrow/index.js'
@@ -486,6 +488,36 @@ describe('MorphoBorrowProvider - repay', () => {
       provider.repay({ market, walletAddress, amount: { max: true } }),
     ).rejects.toBeInstanceOf(EmptyPositionError)
   })
+
+  it('rejects a share-based repay without provider-bound repay shares', async () => {
+    const cm = makeChainManagerWithMulticall(async () =>
+      stateMulticallResult({
+        borrowShares: oneEth * 3n,
+        allowance: oneEth * 999n,
+      }),
+    )
+    const provider = new MorphoBorrowProvider({ marketAllowlist: [market] }, cm)
+    const quote = await provider.repay({
+      market,
+      walletAddress,
+      amount: { amountRaw: oneEth },
+    })
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: {
+            ...quote.execution,
+            transactions: [
+              encodeMorphoRepay(market, 0n, oneEth * 999n, walletAddress),
+            ],
+          },
+        },
+        walletAddress,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
+  })
 })
 
 describe('MorphoBorrowProvider - openPosition', () => {
@@ -503,6 +535,32 @@ describe('MorphoBorrowProvider - openPosition', () => {
     expect(quote.borrowAmountRaw).toBe(oneEth)
     expect(quote.collateralAmountRaw).toBe(oneEth * 5n)
     expect(quote.expiresAt).toBeGreaterThan(quote.quotedAt)
+  })
+
+  it('rejects a pre-built quote with a duplicated borrow leg', async () => {
+    const cm = makeChainManagerWithMulticall(async () => stateMulticallResult())
+    const provider = new MorphoBorrowProvider({ marketAllowlist: [market] }, cm)
+    const quote = await provider.openPosition({
+      market,
+      walletAddress,
+      borrowAmount: { amountRaw: oneEth },
+      collateralAmount: { amountRaw: oneEth * 5n },
+    })
+    const borrow = quote.execution.transactions[2]
+    if (!borrow) throw new Error('expected borrow transaction')
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: {
+            ...quote.execution,
+            transactions: [...quote.execution.transactions, borrow],
+          },
+        },
+        walletAddress,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
   })
 
   it('emits a single borrow tx when collateral is already supplied', async () => {

@@ -11,6 +11,7 @@ import {
   assertUniversalSwapFields,
 } from '@/actions/swap/providers/velodrome/encoding/decodeQuoteFields.js'
 import { UNIVERSAL_ROUTER_MSG_SENDER } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
+import type { ResolvedPoolConfig } from '@/actions/swap/providers/velodrome/types.js'
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { SwapQuote } from '@/types/swap/index.js'
 
@@ -38,16 +39,20 @@ const UNIVERSAL_SWAP_COMMANDS = new Set(['0x08', '0x00'])
  * @throws QuoteCalldataMismatchError when the recipient encoded in the bytes is
  * not the executing wallet, or the calldata is not a recognized Velodrome swap.
  */
-export function assertVelodromeQuoteBound(quote: SwapQuote): void {
+export function assertVelodromeQuoteBound(
+  quote: SwapQuote,
+  expectedPool: ResolvedPoolConfig,
+  expectedFactory: `0x${string}`,
+): void {
   const data = quote.execution.swapCalldata
 
   const universal = tryDecodeUniversal(data)
   if (universal) {
-    assertUniversalSwapMatchesQuote(quote, universal)
+    assertUniversalSwapMatchesQuote(quote, universal, expectedPool)
     return
   }
 
-  if (isRouterSwapCall(quote, data)) {
+  if (isRouterSwapCall(quote, data, expectedPool, expectedFactory)) {
     return
   }
 
@@ -60,11 +65,15 @@ export function assertVelodromeQuoteBound(quote: SwapQuote): void {
 /** Decode `execute(bytes commands, bytes[] inputs, uint256 deadline)`, or `undefined` when the bytes are a router call instead. */
 function tryDecodeUniversal(
   data: Hex,
-): { commands: Hex; inputs: readonly Hex[] } | undefined {
+): { commands: Hex; inputs: readonly Hex[]; deadline: bigint } | undefined {
   try {
     const decoded = decodeFunctionData({ abi: UNIVERSAL_ROUTER_ABI, data })
     if (decoded.functionName !== 'execute') return undefined
-    return { commands: decoded.args[0], inputs: decoded.args[1] }
+    return {
+      commands: decoded.args[0],
+      inputs: decoded.args[1],
+      deadline: decoded.args[2],
+    }
   } catch {
     return undefined
   }
@@ -75,14 +84,18 @@ function assertUniversalSwapMatchesQuote(
   decoded: {
     commands: Hex
     inputs: readonly Hex[]
+    deadline: bigint
   },
+  expectedPool: ResolvedPoolConfig,
 ): void {
   assertUniversalShape(decoded)
+  assertDeadline(quote, decoded.deadline)
   assertUniversalSwapFields(
     quote,
     decoded.commands,
     decoded.inputs[0],
     UNIVERSAL_ROUTER_MSG_SENDER,
+    expectedPool,
   )
 }
 
@@ -106,28 +119,50 @@ function assertUniversalShape(decoded: {
   }
 }
 
-function isRouterSwapCall(quote: SwapQuote, data: Hex): boolean {
+function isRouterSwapCall(
+  quote: SwapQuote,
+  data: Hex,
+  expectedPool: ResolvedPoolConfig,
+  expectedFactory: `0x${string}`,
+): boolean {
   for (const abi of [V2_ROUTER_ABI, LEAF_ROUTER_ABI] as const) {
     try {
       const decoded = decodeFunctionData({ abi, data })
       if (decoded.functionName === 'swapExactETHForTokens') {
-        assertRouterSwapFields(quote, {
-          amountOutMin: decoded.args[0],
-          routes: decoded.args[1],
-          recipient: decoded.args[2],
-        })
+        assertRouterSwapFields(
+          quote,
+          {
+            kind: 'ethForTokens',
+            amountOutMin: decoded.args[0],
+            routes: decoded.args[1],
+            recipient: decoded.args[2],
+            deadline: decoded.args[3],
+          },
+          expectedPool,
+          expectedFactory,
+        )
         return true
       }
       if (
         decoded.functionName === 'swapExactTokensForTokens' ||
         decoded.functionName === 'swapExactTokensForETH'
       ) {
-        assertRouterSwapFields(quote, {
-          amountIn: decoded.args[0],
-          amountOutMin: decoded.args[1],
-          routes: decoded.args[2],
-          recipient: decoded.args[3],
-        })
+        assertRouterSwapFields(
+          quote,
+          {
+            kind:
+              decoded.functionName === 'swapExactTokensForETH'
+                ? 'tokensForEth'
+                : 'tokensForTokens',
+            amountIn: decoded.args[0],
+            amountOutMin: decoded.args[1],
+            routes: decoded.args[2],
+            recipient: decoded.args[3],
+            deadline: decoded.args[4],
+          },
+          expectedPool,
+          expectedFactory,
+        )
         return true
       }
       // Decoded as a non-swap router function (e.g. getAmountsOut): not a swap.
@@ -136,4 +171,14 @@ function isRouterSwapCall(quote: SwapQuote, data: Hex): boolean {
     }
   }
   return false
+}
+
+function assertDeadline(quote: SwapQuote, actual: bigint): void {
+  const expected = BigInt(quote.deadline)
+  if (actual === expected) return
+  throw new QuoteCalldataMismatchError({
+    field: 'deadline',
+    expected: expected.toString(),
+    received: actual.toString(),
+  })
 }
