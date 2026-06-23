@@ -112,7 +112,7 @@ export const EXACT_OUTPUT_SINGLE_PARAMS = [
   },
 ] as const
 
-/** ABI type for SETTLE_ALL / TAKE_ALL params */
+/** ABI type for SETTLE_ALL params */
 export const CURRENCY_AMOUNT_PARAMS = [
   { type: 'address' },
   { type: 'uint256' },
