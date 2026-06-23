@@ -1,3 +1,4 @@
+import { type Address, encodeFunctionData, erc20Abi, maxUint256 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,11 +10,15 @@ import {
   walletAddress,
 } from '@/actions/borrow/__tests__/fixtures.js'
 import { WalletBorrowNamespace } from '@/actions/borrow/namespaces/WalletBorrowNamespace.js'
+import { encodeMorphoBorrow } from '@/actions/borrow/providers/morpho/blue.js'
+import { MorphoBorrowProvider } from '@/actions/borrow/providers/morpho/MorphoBorrowProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
   ChainNotSupportedError,
   InvalidParamsError,
+  MarketNotAllowedError,
   ProviderNotConfiguredError,
+  QuoteCalldataMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
 } from '@/core/error/errors.js'
@@ -30,6 +35,7 @@ const batchTransactionHashes = [
   '0xe0a0000000000000000000000000000000000000000000000000000000000002',
   '0xe0a0000000000000000000000000000000000000000000000000000000000003',
 ] as const
+const attacker = '0x000000000000000000000000000000000000c0de' as Address
 
 function makeWallet() {
   const chainManager = new MockChainManager({
@@ -100,6 +106,18 @@ function makeProvider(): MockBorrowProvider {
   )
   provider.repay.mockResolvedValue(makeQuote({ action: 'repay' }))
   return provider
+}
+
+function makeMorphoProvider(
+  config: BorrowProviderConfig = {},
+): MorphoBorrowProvider {
+  const chainManager = new MockChainManager({
+    supportedChains: [BASE_SEPOLIA_ID],
+  }) as unknown as ChainManager
+  return new MorphoBorrowProvider(
+    { marketAllowlist: [market], ...config },
+    chainManager,
+  )
 }
 
 beforeEach(() => {
@@ -201,7 +219,7 @@ describe('WalletBorrowNamespace - quote validation', () => {
     ).rejects.toBeInstanceOf(ChainNotSupportedError)
   })
 
-  it('throws ProviderNotConfiguredError for a quote outside the configured market allowlist', async () => {
+  it('throws MarketNotAllowedError for a quote outside the configured market allowlist', async () => {
     const { wallet } = makeWallet()
     const namespace = new WalletBorrowNamespace(
       { morpho: makeProvider() },
@@ -218,7 +236,20 @@ describe('WalletBorrowNamespace - quote validation', () => {
           },
         }),
       ),
-    ).rejects.toBeInstanceOf(ProviderNotConfiguredError)
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+  })
+
+  it('throws MarketNotAllowedError for a quote whose market is blocklisted', async () => {
+    const { wallet } = makeWallet()
+    const provider = new MockBorrowProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    const namespace = new WalletBorrowNamespace({ morpho: provider }, wallet)
+
+    await expect(namespace.openPosition(makeQuote())).rejects.toBeInstanceOf(
+      MarketNotAllowedError,
+    )
   })
 
   it('throws InvalidParamsError when quote.action does not match the called method', async () => {
@@ -247,6 +278,58 @@ describe('WalletBorrowNamespace - quote validation', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(QuoteRecipientMismatchError)
+  })
+
+  it('rejects an approval leg whose spender is not the trusted Morpho contract', async () => {
+    const { wallet, mocks } = makeWallet()
+    const namespace = new WalletBorrowNamespace(
+      { morpho: makeMorphoProvider() },
+      wallet,
+    )
+    const quote = makeQuote({
+      collateralAmountRaw: 1n,
+      execution: {
+        transactions: [
+          {
+            to: market.marketParams.collateralToken,
+            data: encodeFunctionData({
+              abi: erc20Abi,
+              functionName: 'approve',
+              args: [attacker, maxUint256],
+            }),
+            value: 0n,
+          },
+        ],
+      },
+    })
+
+    await expect(namespace.openPosition(quote)).rejects.toBeInstanceOf(
+      QuoteCalldataMismatchError,
+    )
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.sendBatch).not.toHaveBeenCalled()
+  })
+
+  it('rejects Morpho borrow calldata whose onBehalf address is off-account', async () => {
+    const { wallet, mocks } = makeWallet()
+    const namespace = new WalletBorrowNamespace(
+      { morpho: makeMorphoProvider() },
+      wallet,
+    )
+    const quote = makeQuote({
+      borrowAmountRaw: 1n,
+      execution: {
+        transactions: [
+          encodeMorphoBorrow(market, 1n, 0n, attacker, walletAddress),
+        ],
+      },
+    })
+
+    await expect(namespace.openPosition(quote)).rejects.toBeInstanceOf(
+      QuoteCalldataMismatchError,
+    )
+    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.sendBatch).not.toHaveBeenCalled()
   })
 })
 
@@ -285,6 +368,29 @@ describe('WalletBorrowNamespace - re-quote', () => {
     )
   })
 
+  it('validates a raw-path quote before dispatching it', async () => {
+    const { wallet, mocks } = makeWallet()
+    const provider = makeProvider()
+    const validation = vi
+      .spyOn(provider, 'validateQuoteExecution')
+      .mockImplementation(() => {
+        throw new QuoteCalldataMismatchError({ field: 'recipient' })
+      })
+    const namespace = new WalletBorrowNamespace({ morpho: provider }, wallet)
+
+    await expect(
+      namespace.openPosition({
+        market,
+        borrowAmount: { amountRaw: 1n },
+      }),
+    ).rejects.toBeInstanceOf(QuoteCalldataMismatchError)
+    expect(validation).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'open' }),
+      walletAddress,
+    )
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
   it('injects walletAddress across every raw-params action path', async () => {
     const { wallet } = makeWallet()
     const provider = makeProvider()
@@ -321,15 +427,17 @@ describe('WalletBorrowNamespace - re-quote', () => {
     )
   })
 
-  it('routes by marketId when no provider configures the market in its allowlist', async () => {
+  it('re-quotes by market kind before rejecting a quote outside the allowlist', async () => {
     const { wallet } = makeWallet()
     const provider = makeProvider()
     ;(provider.config as BorrowProviderConfig).marketAllowlist = []
     const namespace = new WalletBorrowNamespace({ morpho: provider }, wallet)
-    await namespace.depositCollateral({
-      market,
-      amount: { amountRaw: 1n },
-    })
+    await expect(
+      namespace.depositCollateral({
+        market,
+        amount: { amountRaw: 1n },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
     expect(provider.depositCollateral).toHaveBeenCalled()
   })
 })

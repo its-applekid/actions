@@ -330,10 +330,16 @@ export class InvalidParamsError extends ActionsError {
 /**
  * Thrown when a pre-built quote (swap, borrow, …) is dispatched against a
  * wallet whose address differs from the quote's `recipient`. Some routers
- * (Velodrome v2/leaf) and protocols (Morpho `supplyCollateral` / `borrow` /
- * `repay` / `withdrawCollateral`) encode the recipient or `onBehalf` address
- * directly into calldata, so silently swapping recipients would route assets
- * or position changes to the wrong account.
+ * (Velodrome v2/leaf) and protocols (Aave `borrow`/`supply`/`withdraw`/`repay`,
+ * Morpho `supplyCollateral`/`borrow`/`repay`/`withdrawCollateral`) bake the
+ * recipient or `onBehalf` address directly into calldata, so silently swapping
+ * recipients would route assets or position changes to the wrong account.
+ *
+ * `recipient` is a sidecar metadata field on an untrusted, caller-supplied
+ * object: passing this guard proves the quote *claims* to be for this wallet,
+ * not that the signed bytes actually move funds to it. The calldata-integrity
+ * checks (`RouterNotAllowedError`, `QuoteCalldataMismatchError`) cross the
+ * metadata-to-bytes boundary that this guard alone does not.
  */
 export class QuoteRecipientMismatchError extends ActionsError {
   override name = 'QuoteRecipientMismatchError' as const
@@ -359,6 +365,81 @@ export class QuoteRecipientMissingError extends ActionsError {
 
   constructor() {
     super('Quote.recipient missing. _getQuote must populate it')
+  }
+}
+
+/**
+ * Thrown when a pre-built quote's `execution.routerAddress` is not the router
+ * the resolving provider derives for the quote's chain.
+ * @description The provider is resolved from the untrusted `quote.provider`
+ * field, then approvals are built for that provider's own canonical router. A
+ * quote whose `routerAddress` (the address the swap calldata is actually sent
+ * to) points elsewhere would have the user approve one router and swap through
+ * another. Re-deriving the router from static chain config (no RPC) and
+ * rejecting any mismatch binds `provider` to `routerAddress` before signing.
+ */
+export class RouterNotAllowedError extends ActionsError {
+  override name = 'RouterNotAllowedError' as const
+  provider: string
+  chainId: number
+  expected: string
+  received: string
+
+  constructor(params: {
+    provider: string
+    chainId: number
+    expected: string
+    received: string
+  }) {
+    super(
+      `Quote router ${params.received} is not the ${params.provider} router on chain ${params.chainId}`,
+      {
+        metaMessages: [
+          `Expected router: ${params.expected}`,
+          `Received router: ${params.received}`,
+        ],
+      },
+    )
+    this.provider = params.provider
+    this.chainId = params.chainId
+    this.expected = params.expected
+    this.received = params.received
+  }
+}
+
+/**
+ * Thrown when the bytes a pre-built quote would sign do not match the trusted
+ * metadata derived for that quote.
+ * @description The dispatch path decodes `execution.swapCalldata` /
+ * `execution.transactions[].data` and reconciles the fund-moving fields
+ * (recipient / `onBehalfOf` / `receiver`, spender, target contract, market
+ * params, native value) against what the SDK already knows. Any divergence
+ * fails closed: the quote claims one thing in its metadata while the calldata
+ * encodes another. `field` names the reconciled field, `expected` /`received`
+ * carry the offending values when available.
+ */
+export class QuoteCalldataMismatchError extends ActionsError {
+  override name = 'QuoteCalldataMismatchError' as const
+  field: string
+  expected?: string
+  received?: string
+
+  constructor(params: {
+    field: string
+    expected?: string
+    received?: string
+    detail?: string
+  }) {
+    super(`Quote calldata does not match its metadata: ${params.field}`, {
+      metaMessages: [
+        ...(params.expected ? [`Expected: ${params.expected}`] : []),
+        ...(params.received ? [`Received: ${params.received}`] : []),
+        ...(params.detail ? [params.detail] : []),
+      ],
+    })
+    this.field = params.field
+    this.expected = params.expected
+    this.received = params.received
   }
 }
 

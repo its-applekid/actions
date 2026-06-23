@@ -1,3 +1,4 @@
+import type { Address } from 'viem'
 import { formatUnits } from 'viem'
 
 import { expandMarkets, findMarket } from '@/actions/swap/core/markets.js'
@@ -6,6 +7,7 @@ import {
   getSupportedChainIds,
   getUniswapAddresses,
 } from '@/actions/swap/providers/uniswap/addresses.js'
+import { assertUniswapV4QuoteBound } from '@/actions/swap/providers/uniswap/decode.js'
 import {
   encodeUniversalRouterSwap,
   getQuote,
@@ -50,6 +52,19 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
 
   protocolSupportedChainIds(): SupportedChainId[] {
     return getSupportedChainIds()
+  }
+
+  protected canonicalRouterAddress(chainId: SupportedChainId): Address {
+    return getUniswapAddresses(chainId).universalRouter
+  }
+
+  /**
+   * Uniswap V4 carries no recipient argument (`TAKE_ALL` settles to
+   * `msg.sender`), so binding asserts the calldata is the canonical Universal
+   * Router swap of the quoted pair rather than decoding a recipient field.
+   */
+  protected assertSwapCalldataBound(quote: SwapQuote): void {
+    assertUniswapV4QuoteBound(quote)
   }
 
   protected async _execute(

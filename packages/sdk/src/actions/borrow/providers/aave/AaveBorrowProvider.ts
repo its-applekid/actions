@@ -1,6 +1,7 @@
 import type { Address, PublicClient } from 'viem'
 
 import { BorrowProvider } from '@/actions/borrow/core/BorrowProvider.js'
+import { assertAaveQuoteExecution } from '@/actions/borrow/providers/aave/decode.js'
 import {
   assembleAaveBorrowQuote,
   toAaveBorrowMarket,
@@ -136,6 +137,15 @@ export class AaveBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
       await buildAaveCloseQuoteArgs(client, market, params),
       params.walletAddress,
     )
+  }
+
+  protected _validateQuoteExecution(
+    quote: BorrowQuote,
+    rawMarket: BorrowMarketConfig,
+    walletAddress: Address,
+  ): void {
+    const market = this.requireOwnMarket<AaveBorrowMarketConfig>(rawMarket)
+    assertAaveQuoteExecution(quote, market, walletAddress)
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────

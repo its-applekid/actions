@@ -1,5 +1,6 @@
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import type { TransactionData } from '@/types/transaction.js'
+import { validateAddress, validateNotZeroAddress } from '@/utils/validation.js'
 import type {
   BatchTransactionReturnType,
   TransactionReturnType,
@@ -29,6 +30,10 @@ export async function executeTransactionBatch(
 ): Promise<TransactionReturnType | BatchTransactionReturnType> {
   if (transactions.length === 0) {
     throw new Error('executeTransactionBatch: empty transaction list')
+  }
+  for (const transaction of transactions) {
+    validateAddress(transaction.to, 'transaction.to')
+    validateNotZeroAddress(transaction.to, 'transaction.to')
   }
   if (transactions.length === 1) {
     return wallet.send(transactions[0], chainId)

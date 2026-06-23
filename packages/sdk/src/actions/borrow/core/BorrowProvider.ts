@@ -64,13 +64,6 @@ export abstract class BorrowProvider<
     super(config, chainManager, settings)
   }
 
-  /**
-   * The `BorrowMarketId` discriminator this provider services. Lets the
-   * namespace route a market to its provider by kind without naming concrete
-   * providers, and is the fallback when a provider carries no market allowlist.
-   */
-  public abstract get marketKind(): BorrowMarketId['kind']
-
   /** Resolved quote expiration in seconds: provider → settings → `DEFAULT_QUOTE_EXPIRATION_SECONDS`. */
   public get quoteExpirationSeconds(): number {
     return (
@@ -84,6 +77,13 @@ export abstract class BorrowProvider<
   public get defaultHealthBufferPct(): number {
     return this._settings.healthBufferPct ?? DEFAULTS.healthBufferPct
   }
+
+  /**
+   * The `BorrowMarketId` discriminator this provider services. Lets the
+   * namespace route a market to its provider by kind without naming concrete
+   * providers, and is the fallback when a provider carries no market allowlist.
+   */
+  public abstract get marketKind(): BorrowMarketId['kind']
 
   // ─────────────────────────────────────────────────────────────────────────
   // Public action methods
@@ -255,6 +255,26 @@ export abstract class BorrowProvider<
     return this._getPosition({ market, walletAddress: params.walletAddress })
   }
 
+  /**
+   * Validate a pre-built quote's transaction bytes before wallet dispatch.
+   * @description Resolves the trusted market config through this provider's
+   * allowlist and blocklist, then lets the concrete provider decode every leg
+   * against its protocol ABI. This binds sidecar quote metadata to the bytes
+   * the wallet will sign.
+   * @param quote - Borrow quote to reconcile against its calldata bundle.
+   * @param walletAddress - Wallet that will sign and execute the bundle.
+   * @throws MarketNotAllowedError when the market is not configured or is blocked.
+   * @throws QuoteCalldataMismatchError when transaction bytes diverge from metadata.
+   */
+  public validateQuoteExecution(
+    quote: BorrowQuote,
+    walletAddress: Address,
+  ): void {
+    this.assertChainSupported(quote.marketId.chainId)
+    const market = this.requireAllowlistedMarketConfig(quote.marketId)
+    this._validateQuoteExecution(quote, market, walletAddress)
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Protected helpers
   // ─────────────────────────────────────────────────────────────────────────
@@ -283,6 +303,31 @@ export abstract class BorrowProvider<
       )
     }
     return market as T
+  }
+
+  /**
+   * Read each requested market concurrently. A market whose read rejects
+   * (e.g. a reverting reserve call or transient RPC failure) is dropped from
+   * the result rather than failing the whole list, but the rejection is
+   * logged so a shrinking market list can be correlated to the underlying
+   * fault instead of silently looking like a smaller successful response.
+   */
+  protected async _getMarkets(
+    params: GetBorrowMarketsParams,
+  ): Promise<BorrowMarket[]> {
+    const markets = params.markets ?? []
+    const results = await Promise.allSettled(
+      markets.map((market) => this._getMarket(market)),
+    )
+    return results.flatMap((result, i) => {
+      if (result.status === 'fulfilled') return result.value
+      const market = markets[i]
+      console.error(
+        `Failed to read borrow market ${market.marketId} on chain ${market.chainId}:`,
+        result.reason,
+      )
+      return []
+    })
   }
 
   /**
@@ -344,6 +389,12 @@ export abstract class BorrowProvider<
     params: BorrowRepayInternalParams,
   ): Promise<BorrowQuote>
 
+  protected abstract _validateQuoteExecution(
+    quote: BorrowQuote,
+    market: BorrowMarketConfig,
+    walletAddress: Address,
+  ): void
+
   // ─────────────────────────────────────────────────────────────────────────
   // Abstract read hooks
   // ─────────────────────────────────────────────────────────────────────────
@@ -351,31 +402,6 @@ export abstract class BorrowProvider<
   protected abstract _getMarket(
     market: BorrowMarketConfig,
   ): Promise<BorrowMarket>
-
-  /**
-   * Read each requested market concurrently. A market whose read rejects
-   * (e.g. a reverting reserve call or transient RPC failure) is dropped from
-   * the result rather than failing the whole list, but the rejection is
-   * logged so a shrinking market list can be correlated to the underlying
-   * fault instead of silently looking like a smaller successful response.
-   */
-  protected async _getMarkets(
-    params: GetBorrowMarketsParams,
-  ): Promise<BorrowMarket[]> {
-    const markets = params.markets ?? []
-    const results = await Promise.allSettled(
-      markets.map((market) => this._getMarket(market)),
-    )
-    return results.flatMap((result, i) => {
-      if (result.status === 'fulfilled') return result.value
-      const market = markets[i]
-      console.error(
-        `Failed to read borrow market ${market.marketId} on chain ${market.chainId}:`,
-        result.reason,
-      )
-      return []
-    })
-  }
 
   protected abstract _getPosition(params: {
     market: BorrowMarketConfig

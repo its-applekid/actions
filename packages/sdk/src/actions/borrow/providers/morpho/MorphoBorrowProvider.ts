@@ -13,6 +13,7 @@ import {
   buildCloseTransactions,
   computeClose,
 } from '@/actions/borrow/providers/morpho/close.js'
+import { assertMorphoQuoteExecution } from '@/actions/borrow/providers/morpho/decode.js'
 import {
   computeMorphoMarketId,
   verifyMorphoMarketId,
@@ -318,6 +319,15 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
       },
       params.walletAddress,
     )
+  }
+
+  protected _validateQuoteExecution(
+    quote: BorrowQuote,
+    rawMarket: BorrowMarketConfig,
+    walletAddress: Address,
+  ): void {
+    const market = this.requireOwnMarket<MorphoBorrowMarketConfig>(rawMarket)
+    assertMorphoQuoteExecution(quote, market, walletAddress)
   }
 
   // Each `fetchX` wraps the corresponding `fetchMorphoX` in `state.ts` so
