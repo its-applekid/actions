@@ -80,9 +80,9 @@
   },
   "devDependencies": {
     "@types/node": "22.14.0",
-    "@uniswap/sdk-core": "^7.18.0",
-    "@uniswap/universal-router-sdk": "^5.8.0",
-    "@uniswap/v4-sdk": "^2.2.3",
+    "@uniswap/sdk-core": "7.18.0",
+    "@uniswap/universal-router-sdk": "5.8.0",
+    "@uniswap/v4-sdk": "2.2.3",
     "dotenv": "^16.4.5",
     "eslint": "^9.31.0",
     "prettier": "^3.0.0",
