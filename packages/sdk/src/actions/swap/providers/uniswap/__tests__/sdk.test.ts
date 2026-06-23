@@ -1,13 +1,23 @@
+import { CurrencyAmount, Price, Token } from '@uniswap/sdk-core'
+import { CommandType } from '@uniswap/universal-router-sdk'
+import { Actions, V4Planner } from '@uniswap/v4-sdk'
+import { BigNumber } from 'ethers'
 import {
   type Address,
   decodeAbiParameters,
   decodeFunctionData,
+  type Hex,
   type PublicClient,
   zeroAddress,
 } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
-import { UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/uniswap/abis.js'
+import {
+  CURRENCY_AMOUNT_PARAMS,
+  EXACT_INPUT_SINGLE_PARAMS,
+  EXACT_OUTPUT_SINGLE_PARAMS,
+  UNIVERSAL_ROUTER_ABI,
+} from '@/actions/swap/providers/uniswap/abis.js'
 import {
   calculatePriceImpact,
   encodeUniversalRouterSwap,
@@ -258,6 +268,56 @@ describe('calculatePriceImpact', () => {
   })
 })
 
+// #318: pin the hand-rolled `sqrtPriceX96² / 2¹⁹²` mid-price math against the
+// Uniswap SDK's price utilities. We derive the mid-price quoted output via
+// `@uniswap/sdk-core`'s `Price` (the same ratio v3/v4 pools expose) and assert
+// our `calculatePriceImpact` reads ~0 impact at that SDK-derived output, and a
+// proportional impact when execution is worse — so the fixed-point math has an
+// external reference rather than asserting against itself.
+describe('calculatePriceImpact — Uniswap SDK price reference (#318)', () => {
+  // Equal decimals → the sdk-core Price scalar is 1, so `.quote()` returns the
+  // raw mid-price output directly comparable to our integer math.
+  const token0 = new Token(10, '0x1111111111111111111111111111111111111111', 18)
+  const token1 = new Token(10, '0x2222222222222222222222222222222222222222', 18)
+  const SQRT_PRICE = 5602302599546145575577086272208896n // ~70711² ≈ 5e9 ratio
+  const Q192 = 1n << 192n
+  const amountIn = 10n ** 9n
+
+  // Reference mid-price output from the Uniswap SDK: amountIn * sqrtPrice² / 2¹⁹².
+  const midPrice = new Price(
+    token0,
+    token1,
+    Q192.toString(),
+    (SQRT_PRICE * SQRT_PRICE).toString(),
+  )
+  const refQuotedOut = BigInt(
+    midPrice
+      .quote(CurrencyAmount.fromRawAmount(token0, amountIn.toString()))
+      .quotient.toString(),
+  )
+
+  it('reads ~0 impact at the SDK-derived mid-price output', () => {
+    const impact = calculatePriceImpact({
+      sqrtPriceX96: SQRT_PRICE,
+      amountIn,
+      amountOut: refQuotedOut,
+      zeroForOne: true,
+    })
+    expect(Math.abs(impact)).toBeLessThan(1e-4)
+  })
+
+  it('reads ~20% impact when execution is 20% below the SDK mid-price', () => {
+    const impact = calculatePriceImpact({
+      sqrtPriceX96: SQRT_PRICE,
+      amountIn,
+      amountOut: (refQuotedOut * 80n) / 100n,
+      zeroForOne: true,
+    })
+    expect(impact).toBeGreaterThan(0.199)
+    expect(impact).toBeLessThan(0.201)
+  })
+})
+
 describe('encodeUniversalRouterSwap', () => {
   const baseQuote = {
     price: '0.005',
@@ -427,5 +487,242 @@ describe('encodeUniversalRouterSwap', () => {
 
     // Different slippage should produce different calldata
     expect(noSlippage).not.toBe(withSlippage)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Uniswap-SDK differential oracle (F153, F180)
+//
+// The hand-rolled V4 encoder is anchored against the canonical Uniswap reference
+// encoders (`@uniswap/v4-sdk`, `@uniswap/universal-router-sdk`) — dev-only deps,
+// never in the runtime closure. For the same intent we build the V4 swap input
+// with `V4Planner` and assert byte-equality against our `encodeUniversalRouterSwap`
+// output, then decode the security-critical params (recipient, min-out / max-in,
+// amounts) out of our calldata. This replaces the encoder-asserts-itself tests
+// with an independent reference.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('encodeUniversalRouterSwap — Uniswap SDK differential', () => {
+  const diffQuote = {
+    price: '0',
+    priceInverse: '0',
+    amountIn: 100,
+    amountOut: 0.5,
+    amountInRaw: 100000000n,
+    amountOutRaw: 500000000000000000n,
+    priceImpact: 0,
+    route: { path: [USDC, WETH], pools: [] },
+  }
+  const SLIPPAGE = 0.005
+  const DEADLINE = 1700000000
+
+  const bn = (v: bigint) => BigNumber.from(v.toString())
+
+  /** Pull the decoded `execute(commands, inputs, deadline)` out of our calldata. */
+  const decodeExecute = (calldata: Hex) => {
+    const { args } = decodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      data: calldata,
+    })
+    return args as readonly [Hex, Hex[], bigint]
+  }
+
+  const v4SwapInputOf = (calldata: Hex): Hex => decodeExecute(calldata)[1][0]!
+
+  it('exact-in: byte-equal to V4Planner and pins min-out + take currency', () => {
+    const minOut =
+      (diffQuote.amountOutRaw * BigInt(Math.round((1 - SLIPPAGE) * 10000))) /
+      10000n
+    const ours = encodeUniversalRouterSwap({
+      amountInRaw: diffQuote.amountInRaw,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient: zeroAddress,
+      chainId: CHAIN_ID,
+      quote: diffQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    // Reference: encode the same intent with the canonical V4Planner.
+    const poolKey = {
+      currency0: USDC.address[CHAIN_ID]!,
+      currency1: WETH.address[CHAIN_ID]!,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+      hooks: zeroAddress,
+    }
+    const planner = new V4Planner()
+    planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
+      {
+        poolKey,
+        zeroForOne: true,
+        amountIn: bn(diffQuote.amountInRaw),
+        amountOutMinimum: bn(minOut),
+        hookData: '0x',
+      },
+    ])
+    planner.addAction(Actions.SETTLE_ALL, [
+      poolKey.currency0,
+      bn(diffQuote.amountInRaw),
+    ])
+    planner.addAction(Actions.TAKE_ALL, [poolKey.currency1, bn(minOut)])
+
+    const [commands, , deadline] = decodeExecute(ours)
+    // Command byte ties to the SDK's own V4_SWAP constant (16 → 0x10).
+    expect(commands).toBe(
+      `0x${CommandType.V4_SWAP.toString(16).padStart(2, '0')}`,
+    )
+    expect(deadline).toBe(BigInt(DEADLINE))
+    expect(v4SwapInputOf(ours)).toBe(planner.finalize())
+
+    // Independent decode of the security-critical fields out of OUR bytes.
+    const [actions, params] = decodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      v4SwapInputOf(ours),
+    )
+    expect(actions).toBe('0x060c0f')
+    const [swap] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, params[0]!)
+    expect(swap.amountIn).toBe(diffQuote.amountInRaw)
+    expect(swap.amountOutMinimum).toBe(minOut)
+    const [takeCurrency, takeMin] = decodeAbiParameters(
+      CURRENCY_AMOUNT_PARAMS,
+      params[2]!,
+    )
+    expect((takeCurrency as Address).toLowerCase()).toBe(
+      WETH.address[CHAIN_ID]!.toLowerCase(),
+    )
+    expect(takeMin).toBe(minOut)
+  })
+
+  it('exact-out: byte-equal to V4Planner and pins max-in', () => {
+    const maxIn =
+      diffQuote.amountInRaw +
+      (diffQuote.amountInRaw * BigInt(Math.round(SLIPPAGE * 10000))) / 10000n
+    const ours = encodeUniversalRouterSwap({
+      amountOutRaw: diffQuote.amountOutRaw,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient: zeroAddress,
+      chainId: CHAIN_ID,
+      quote: diffQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    const poolKey = {
+      currency0: USDC.address[CHAIN_ID]!,
+      currency1: WETH.address[CHAIN_ID]!,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+      hooks: zeroAddress,
+    }
+    const planner = new V4Planner()
+    planner.addAction(Actions.SWAP_EXACT_OUT_SINGLE, [
+      {
+        poolKey,
+        zeroForOne: true,
+        amountOut: bn(diffQuote.amountOutRaw),
+        amountInMaximum: bn(maxIn),
+        hookData: '0x',
+      },
+    ])
+    planner.addAction(Actions.SETTLE_ALL, [poolKey.currency0, bn(maxIn)])
+    planner.addAction(Actions.TAKE_ALL, [
+      poolKey.currency1,
+      bn(diffQuote.amountOutRaw),
+    ])
+
+    expect(v4SwapInputOf(ours)).toBe(planner.finalize())
+
+    const [, params] = decodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      v4SwapInputOf(ours),
+    )
+    const [swap] = decodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, params[0]!)
+    expect(swap.amountOut).toBe(diffQuote.amountOutRaw)
+    expect(swap.amountInMaximum).toBe(maxIn)
+  })
+
+  it('native-in: byte-equal to V4Planner (ETH settled as currency0)', () => {
+    const nativeQuote = {
+      ...diffQuote,
+      amountInRaw: 10n ** 18n,
+      amountOutRaw: 2000000000n,
+    }
+    const minOut =
+      (nativeQuote.amountOutRaw * BigInt(Math.round((1 - SLIPPAGE) * 10000))) /
+      10000n
+    const ours = encodeUniversalRouterSwap({
+      amountInRaw: nativeQuote.amountInRaw,
+      assetIn: ETH,
+      assetOut: USDC,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient: zeroAddress,
+      chainId: CHAIN_ID,
+      quote: nativeQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    // ETH (address(0)) sorts as currency0; USDC currency1; zeroForOne true.
+    const poolKey = {
+      currency0: zeroAddress,
+      currency1: USDC.address[CHAIN_ID]!,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+      hooks: zeroAddress,
+    }
+    const planner = new V4Planner()
+    planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
+      {
+        poolKey,
+        zeroForOne: true,
+        amountIn: bn(nativeQuote.amountInRaw),
+        amountOutMinimum: bn(minOut),
+        hookData: '0x',
+      },
+    ])
+    planner.addAction(Actions.SETTLE_ALL, [
+      zeroAddress,
+      bn(nativeQuote.amountInRaw),
+    ])
+    planner.addAction(Actions.TAKE_ALL, [poolKey.currency1, bn(minOut)])
+
+    expect(v4SwapInputOf(ours)).toBe(planner.finalize())
+  })
+
+  // F046 / #444: our encoder cannot route output to a non-msg.sender recipient.
+  // V4 `TAKE_ALL` carries no recipient — output always goes to msg.sender — and
+  // the caller's `recipient` arg is dropped entirely. Pin that the caller's
+  // address never appears in the signed bytes, so the day the encoder is fixed
+  // to honor `recipient` (or to throw), this test fails and forces the update
+  // instead of silently routing funds to msg.sender.
+  it('drops the caller recipient — output is not routed to recipient != msg.sender', () => {
+    const recipient = '0x00000000000000000000000000000000DeaDBeef' as Address
+    const calldata = encodeUniversalRouterSwap({
+      amountInRaw: diffQuote.amountInRaw,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient,
+      chainId: CHAIN_ID,
+      quote: diffQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    expect(calldata.toLowerCase()).not.toContain(
+      recipient.slice(2).toLowerCase(),
+    )
   })
 })

@@ -7,6 +7,7 @@ import {
   MockUSDCAsset,
   MockWETHAsset,
 } from '@/__mocks__/MockAssets.js'
+import { UNIVERSAL_ROUTER_MSG_SENDER } from '@/actions/swap/core/markets.js'
 import {
   LEAF_ROUTER_ABI,
   UNIVERSAL_ROUTER_ABI,
@@ -227,6 +228,44 @@ describe('encodeSwap', () => {
         (p) => p.name === 'payerIsUser',
       )
       expect(decoded[payerIsUserIdx]).toBe(true)
+    })
+
+    // Symmetry with the v2/leaf siblings that assert `args[3] === RECIPIENT`.
+    // The universal-router path hard-codes the msg.sender sentinel and silently
+    // drops the caller's `recipient`. Decode the recipient field and pin both
+    // facts so the F003/#444 sentinel behavior cannot drift unnoticed: the day
+    // the encoder is fixed to honor `recipient`, this test fails and forces an
+    // update rather than shipping a wrong-recipient swap green.
+    it('encodes recipient = msg.sender sentinel and drops the caller recipient', () => {
+      const data = encodeSwap({
+        assetIn: MockUSDCAsset,
+        assetOut: MockWETHAsset,
+        amountInRaw: 1000000n,
+        amountOutMin: 400000000000000000n,
+        routerType: 'universal',
+        stable: false,
+        factoryAddress: FACTORY,
+        recipient: RECIPIENT,
+        deadline: DEADLINE,
+        chainId: BASE_CHAIN_ID,
+      })
+
+      const { args } = decode<[Hex, Hex[], bigint]>(UNIVERSAL_ROUTER_ABI, data)
+      const [, inputs] = args
+      const decoded = decodeAbiParameters(
+        V2_SWAP_EXACT_IN_INPUT_PARAMS,
+        inputs[0],
+      )
+      const recipientIdx = V2_SWAP_EXACT_IN_INPUT_PARAMS.findIndex(
+        (p) => p.name === 'recipient',
+      )
+      const encodedRecipient = decoded[recipientIdx] as Address
+      expect(encodedRecipient.toLowerCase()).toBe(
+        UNIVERSAL_ROUTER_MSG_SENDER.toLowerCase(),
+      )
+      // The caller asked for RECIPIENT; the universal-router encoder routes to
+      // msg.sender instead. Output must not silently go to the caller's address.
+      expect(encodedRecipient.toLowerCase()).not.toBe(RECIPIENT.toLowerCase())
     })
   })
 
