@@ -87,6 +87,24 @@ describe('assertVelodromeQuoteBound', () => {
         assertVelodromeQuoteBound(velodromeQuote(OP, v2Calldata(ATTACKER))),
       ).toThrow(QuoteCalldataMismatchError)
     })
+
+    it('rejects calldata whose input amount is larger than the quote amount', () => {
+      const data = encodeSwap({
+        assetIn: MockUSDCAsset,
+        assetOut: MockWETHAsset,
+        amountInRaw: 2_000_000n,
+        amountOutMin: 398_000_000_000_000_000n,
+        routerType: 'v2',
+        stable: false,
+        factoryAddress: FACTORY,
+        recipient: WALLET,
+        deadline: 9_999_999_999,
+        chainId: OP,
+      })
+      expect(() => assertVelodromeQuoteBound(velodromeQuote(OP, data))).toThrow(
+        QuoteCalldataMismatchError,
+      )
+    })
   })
 
   describe('universal router (msg.sender sentinel)', () => {

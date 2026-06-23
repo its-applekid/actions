@@ -1,16 +1,15 @@
-import type { Address, Hex } from 'viem'
-import {
-  decodeAbiParameters,
-  decodeFunctionData,
-  isAddressEqual,
-  slice,
-} from 'viem'
+import type { Hex } from 'viem'
+import { decodeFunctionData } from 'viem'
 
 import {
   LEAF_ROUTER_ABI,
   UNIVERSAL_ROUTER_ABI,
   V2_ROUTER_ABI,
 } from '@/actions/swap/providers/velodrome/abis.js'
+import {
+  assertRouterSwapFields,
+  assertUniversalSwapFields,
+} from '@/actions/swap/providers/velodrome/encoding/decodeQuoteFields.js'
 import { UNIVERSAL_ROUTER_MSG_SENDER } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { SwapQuote } from '@/types/swap/index.js'
@@ -44,19 +43,11 @@ export function assertVelodromeQuoteBound(quote: SwapQuote): void {
 
   const universal = tryDecodeUniversal(data)
   if (universal) {
-    assertUniversalRecipientIsSentinel(universal)
+    assertUniversalSwapMatchesQuote(quote, universal)
     return
   }
 
-  const literalRecipient = tryDecodeRouterRecipient(data)
-  if (literalRecipient !== undefined) {
-    if (!isAddressEqual(literalRecipient, quote.recipient)) {
-      throw new QuoteCalldataMismatchError({
-        field: 'recipient',
-        expected: quote.recipient,
-        received: literalRecipient,
-      })
-    }
+  if (isRouterSwapCall(quote, data)) {
     return
   }
 
@@ -79,7 +70,23 @@ function tryDecodeUniversal(
   }
 }
 
-function assertUniversalRecipientIsSentinel(decoded: {
+function assertUniversalSwapMatchesQuote(
+  quote: SwapQuote,
+  decoded: {
+    commands: Hex
+    inputs: readonly Hex[]
+  },
+): void {
+  assertUniversalShape(decoded)
+  assertUniversalSwapFields(
+    quote,
+    decoded.commands,
+    decoded.inputs[0],
+    UNIVERSAL_ROUTER_MSG_SENDER,
+  )
+}
+
+function assertUniversalShape(decoded: {
   commands: Hex
   inputs: readonly Hex[]
 }): void {
@@ -97,52 +104,36 @@ function assertUniversalRecipientIsSentinel(decoded: {
       received: String(decoded.inputs.length),
     })
   }
-  const recipient = decodeUniversalRecipient(decoded.inputs[0])
-  if (!isAddressEqual(recipient, UNIVERSAL_ROUTER_MSG_SENDER)) {
-    throw new QuoteCalldataMismatchError({
-      field: 'recipient',
-      expected: `${UNIVERSAL_ROUTER_MSG_SENDER} (msg.sender sentinel)`,
-      received: recipient,
-    })
-  }
 }
 
-function decodeUniversalRecipient(input: Hex): Address {
-  try {
-    // The recipient is the first field of both V2_SWAP and V3_SWAP input payloads.
-    const [recipient] = decodeAbiParameters(
-      [{ type: 'address' }],
-      slice(input, 0, 32),
-    )
-    return recipient
-  } catch {
-    throw new QuoteCalldataMismatchError({
-      field: 'recipient',
-      detail: 'unable to decode universal-router recipient',
-    })
-  }
-}
-
-/** Decode a v2/leaf router swap and return its literal `to` recipient, or `undefined` if the bytes are not such a call. */
-function tryDecodeRouterRecipient(data: Hex): Address | undefined {
+function isRouterSwapCall(quote: SwapQuote, data: Hex): boolean {
   for (const abi of [V2_ROUTER_ABI, LEAF_ROUTER_ABI] as const) {
     try {
       const decoded = decodeFunctionData({ abi, data })
-      // swapExactETHForTokens: (amountOutMin, routes, to, deadline) -> to at index 2.
       if (decoded.functionName === 'swapExactETHForTokens') {
-        return decoded.args[2]
+        assertRouterSwapFields(quote, {
+          amountOutMin: decoded.args[0],
+          routes: decoded.args[1],
+          recipient: decoded.args[2],
+        })
+        return true
       }
-      // swap{ExactTokensForTokens,ExactTokensForETH}: (amountIn, amountOutMin, routes, to, deadline) -> to at index 3.
       if (
         decoded.functionName === 'swapExactTokensForTokens' ||
         decoded.functionName === 'swapExactTokensForETH'
       ) {
-        return decoded.args[3]
+        assertRouterSwapFields(quote, {
+          amountIn: decoded.args[0],
+          amountOutMin: decoded.args[1],
+          routes: decoded.args[2],
+          recipient: decoded.args[3],
+        })
+        return true
       }
       // Decoded as a non-swap router function (e.g. getAmountsOut): not a swap.
     } catch {
       // try the next router ABI
     }
   }
-  return undefined
+  return false
 }

@@ -104,6 +104,25 @@ describe('assertUniswapV4QuoteBound', () => {
     ).toThrow(QuoteCalldataMismatchError)
   })
 
+  it('rejects calldata whose input amount is larger than the quote amount', () => {
+    const largerInput = encodeUniversalRouterSwap({
+      amountInRaw: 2_000_000n,
+      assetIn: MockUSDCAsset,
+      assetOut: MockWETHAsset,
+      slippage: 0.005,
+      deadline: 9_999_999_999,
+      recipient: WALLET,
+      chainId: CHAIN,
+      quote: priceFixture(),
+      universalRouterAddress: ROUTER,
+      fee: 500,
+      tickSpacing: 10,
+    })
+    expect(() =>
+      assertUniswapV4QuoteBound(uniswapQuote({ calldata: largerInput })),
+    ).toThrow(QuoteCalldataMismatchError)
+  })
+
   it('rejects calldata for a different pool than the quoted pair', () => {
     const DAI: Asset = {
       type: 'erc20',

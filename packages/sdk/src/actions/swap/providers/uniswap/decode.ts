@@ -1,19 +1,17 @@
-import type { Address, Hex } from 'viem'
-import {
-  decodeAbiParameters,
-  decodeFunctionData,
-  isAddressEqual,
-  zeroAddress,
-} from 'viem'
+import type { Hex } from 'viem'
+import { decodeAbiParameters, decodeFunctionData } from 'viem'
 
 import {
   EXACT_INPUT_SINGLE_PARAMS,
   EXACT_OUTPUT_SINGLE_PARAMS,
   UNIVERSAL_ROUTER_ABI,
 } from '@/actions/swap/providers/uniswap/abis.js'
+import {
+  assertUniswapQuoteFields,
+  type UniswapSwapParams,
+} from '@/actions/swap/providers/uniswap/decodeQuoteFields.js'
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { SwapQuote } from '@/types/swap/index.js'
-import { getAssetAddress, isNativeAsset } from '@/utils/assets.js'
 
 /**
  * Universal Router command for a V4 swap (`V4_SWAP`). The encoder emits exactly
@@ -93,7 +91,7 @@ export function assertUniswapV4QuoteBound(quote: SwapQuote): void {
   }
 
   const swapParams = decodeSwapParams(params[0], isExactIn)
-  assertPoolMatchesQuote(quote, swapParams.poolKey, swapParams.zeroForOne)
+  assertUniswapQuoteFields(quote, swapParams, isExactIn, params[1], params[2])
 }
 
 /** Decode `execute(bytes commands, bytes[] inputs, uint256 deadline)`, or `undefined` if the bytes are not that call. */
@@ -127,13 +125,7 @@ function decodeV4SwapInput(input: Hex): {
   }
 }
 
-function decodeSwapParams(
-  data: Hex,
-  isExactIn: boolean,
-): {
-  poolKey: { currency0: Address; currency1: Address }
-  zeroForOne: boolean
-} {
+function decodeSwapParams(data: Hex, isExactIn: boolean): UniswapSwapParams {
   try {
     const [swapParams] = decodeAbiParameters(
       isExactIn ? EXACT_INPUT_SINGLE_PARAMS : EXACT_OUTPUT_SINGLE_PARAMS,
@@ -144,53 +136,6 @@ function decodeSwapParams(
     throw new QuoteCalldataMismatchError({
       field: 'swap params',
       detail: 'unable to decode V4 swap params',
-    })
-  }
-}
-
-/** Currency address the quoted pair encodes (native = address(0)). */
-function currencyAddress(
-  asset: SwapQuote['assetIn'],
-  chainId: SwapQuote['chainId'],
-): Address {
-  return isNativeAsset(asset) ? zeroAddress : getAssetAddress(asset, chainId)
-}
-
-/**
- * Assert the decoded pool is the quoted pair *and* the swap direction matches
- * the quoted input. The poolKey is direction-agnostic (currencies are sorted),
- * so currency-set matching alone would pass a quote that reversed the swap and
- * sold the wrong token; the `zeroForOne` check pins the input token to
- * `quote.assetIn`.
- */
-function assertPoolMatchesQuote(
-  quote: SwapQuote,
-  poolKey: { currency0: Address; currency1: Address },
-  zeroForOne: boolean,
-): void {
-  const tokenIn = currencyAddress(quote.assetIn, quote.chainId)
-  const tokenOut = currencyAddress(quote.assetOut, quote.chainId)
-  const [expected0, expected1] =
-    tokenIn.toLowerCase() < tokenOut.toLowerCase()
-      ? [tokenIn, tokenOut]
-      : [tokenOut, tokenIn]
-  if (
-    !isAddressEqual(poolKey.currency0, expected0) ||
-    !isAddressEqual(poolKey.currency1, expected1)
-  ) {
-    throw new QuoteCalldataMismatchError({
-      field: 'poolKey currencies',
-      expected: `${expected0}, ${expected1}`,
-      received: `${poolKey.currency0}, ${poolKey.currency1}`,
-    })
-  }
-  const expectedZeroForOne = isAddressEqual(tokenIn, poolKey.currency0)
-  if (zeroForOne !== expectedZeroForOne) {
-    throw new QuoteCalldataMismatchError({
-      field: 'zeroForOne',
-      expected: String(expectedZeroForOne),
-      received: String(zeroForOne),
-      detail: 'swap direction does not match the quoted input asset',
     })
   }
 }
