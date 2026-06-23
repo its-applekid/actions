@@ -1,5 +1,9 @@
 import type { Address, Hex } from 'viem'
-import { decodeAbiParameters } from 'viem'
+import {
+  decodeAbiParameters,
+  encodeAbiParameters,
+  encodeFunctionData,
+} from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -15,6 +19,7 @@ import {
 } from '@/actions/swap/providers/velodrome/encoding/index.js'
 import { V3_SWAP_EXACT_IN_INPUT_PARAMS } from '@/actions/swap/providers/velodrome/encoding/routers/cl.js'
 import {
+  InvalidParamsError,
   InvalidRecipientError,
   NativeAssetNotSupportedError,
 } from '@/core/error/errors.js'
@@ -99,6 +104,33 @@ describe('encodeCLSwap', () => {
     })
 
     expect(decodeCLSwapRecipient(data)).toBe(OTHER_RECIPIENT)
+  })
+
+  it('rejects calldata that is not a V3_SWAP_EXACT_IN command', () => {
+    const data = encodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: ['0x08', ['0x'], BigInt(DEADLINE)],
+    })
+
+    expect(() => decodeCLSwapRecipient(data)).toThrow(InvalidParamsError)
+  })
+
+  it('rejects calldata that does not spend from msg.sender', () => {
+    const input = encodeAbiParameters(V3_SWAP_EXACT_IN_INPUT_PARAMS, [
+      RECIPIENT,
+      1000000n,
+      400000000000000000n,
+      '0x',
+      false,
+    ])
+    const data = encodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: ['0x00', [input], BigInt(DEADLINE)],
+    })
+
+    expect(() => decodeCLSwapRecipient(data)).toThrow(InvalidParamsError)
   })
 
   it('rejects a malformed or mis-checksummed recipient before encoding', () => {

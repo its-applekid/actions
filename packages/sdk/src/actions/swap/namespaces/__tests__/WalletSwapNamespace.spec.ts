@@ -8,8 +8,13 @@ import {
   TAKE_PARAMS,
   UNIVERSAL_ROUTER_ABI,
 } from '@/actions/swap/providers/uniswap/abis.js'
+import { UNIVERSAL_ROUTER_ABI as VELODROME_UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/velodrome/abis.js'
+import { V2_SWAP_EXACT_IN_INPUT_PARAMS } from '@/actions/swap/providers/velodrome/encoding/routers/v2.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { QuoteCalldataRecipientMismatchError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  QuoteCalldataRecipientMismatchError,
+} from '@/core/error/errors.js'
 import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 
 describe('WalletSwapNamespace', () => {
@@ -43,12 +48,31 @@ describe('WalletSwapNamespace', () => {
     ])
     const input = encodeAbiParameters(
       [{ type: 'bytes' }, { type: 'bytes[]' }],
-      ['0x0e', [takeParams]],
+      ['0x060c0e', ['0x', '0x', takeParams]],
     )
     return encodeFunctionData({
       abi: UNIVERSAL_ROUTER_ABI,
       functionName: 'execute',
       args: ['0x10', [input], 1700000000n],
+    })
+  }
+
+  function encodeVelodromeUniversalPayer(
+    recipient: Address,
+    payerIsUser: boolean,
+  ): `0x${string}` {
+    const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
+      recipient,
+      1n,
+      1n,
+      '0x',
+      payerIsUser,
+      false,
+    ])
+    return encodeFunctionData({
+      abi: VELODROME_UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: ['0x08', [input], 1700000000n],
     })
   }
 
@@ -376,6 +400,33 @@ describe('WalletSwapNamespace', () => {
 
       await expect(namespace.execute(tamperedQuote)).rejects.toBeInstanceOf(
         QuoteCalldataRecipientMismatchError,
+      )
+      expect(provider.mockBuildApprovals).not.toHaveBeenCalled()
+    })
+
+    it('throws when Velodrome calldata does not spend from the wallet', async () => {
+      const provider = createMockSwapProvider(undefined, {
+        provider: 'velodrome',
+      })
+      const wallet = createMockWallet()
+      const namespace = new WalletSwapNamespace({ velodrome: provider }, wallet)
+
+      const quote = await namespace.getQuote({
+        assetIn: USDC,
+        assetOut: ETH,
+        amountIn: 100,
+        chainId: 84532 as SupportedChainId,
+      })
+      const tamperedQuote = {
+        ...quote,
+        execution: {
+          ...quote.execution,
+          swapCalldata: encodeVelodromeUniversalPayer(mockWalletAddress, false),
+        },
+      }
+
+      await expect(namespace.execute(tamperedQuote)).rejects.toBeInstanceOf(
+        InvalidParamsError,
       )
       expect(provider.mockBuildApprovals).not.toHaveBeenCalled()
     })

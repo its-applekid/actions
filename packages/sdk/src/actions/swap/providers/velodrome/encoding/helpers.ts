@@ -1,15 +1,15 @@
-import type { Address } from 'viem'
+import type { Address, Hex } from 'viem'
 import { formatUnits } from 'viem'
 
-import { UNIVERSAL_ROUTER_MSG_SENDER } from '@/actions/swap/core/markets.js'
 import { WETH } from '@/constants/assets.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { ChainNotSupportedError } from '@/core/error/errors.js'
+import {
+  ChainNotSupportedError,
+  InvalidParamsError,
+} from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type { SwapPrice, SwapRoute } from '@/types/swap/index.js'
 import { getAssetAddress, isNativeAsset } from '@/utils/assets.js'
-
-export { UNIVERSAL_ROUTER_MSG_SENDER }
 
 /**
  * Resolve an asset pair to on-chain token addresses for a given chain.
@@ -79,5 +79,57 @@ export function buildSwapPrice(
     amountOutRaw,
     priceImpact: 0,
     route,
+  }
+}
+
+/**
+ * Assert Universal Router calldata contains exactly the expected command byte.
+ * @param commands - Packed Universal Router command bytes
+ * @param command - Expected single command byte
+ * @param expected - Human-readable expected calldata shape
+ * @throws InvalidParamsError when another command is encoded
+ */
+export function assertSingleUniversalCommand(
+  commands: Hex,
+  command: number,
+  expected: string,
+): void {
+  const encodedCommand = `0x${command.toString(16).padStart(2, '0')}`
+  if (commands !== encodedCommand) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected,
+      received: commands,
+    })
+  }
+}
+
+/**
+ * Assert Universal Router calldata contains one input payload for one command.
+ * @param inputs - Universal Router input payloads
+ * @throws InvalidParamsError when extra or missing inputs are encoded
+ */
+export function assertSingleUniversalInput(inputs: readonly Hex[]): void {
+  if (inputs.length !== 1) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Universal Router calldata with one input payload',
+      received: `${inputs.length} input payloads`,
+    })
+  }
+}
+
+/**
+ * Assert Velodrome Universal Router input spends from `msg.sender`.
+ * @param payerIsUser - Decoded payer flag from the router input payload
+ * @throws InvalidParamsError when calldata expects pre-funded router balances
+ */
+export function assertUniversalPayerIsUser(payerIsUser: boolean): void {
+  if (!payerIsUser) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Universal Router input with payerIsUser=true',
+      received: 'payerIsUser=false',
+    })
   }
 }

@@ -245,7 +245,7 @@ export class MockSwapProvider extends SwapProvider<SwapProviderConfig> {
     ])
     const input = encodeAbiParameters(
       [{ type: 'bytes' }, { type: 'bytes[]' }],
-      ['0x0e', [takeParams]],
+      ['0x060c0e', ['0x', '0x', takeParams]],
     )
     return encodeFunctionData({
       abi: UNISWAP_UNIVERSAL_ROUTER_ABI,

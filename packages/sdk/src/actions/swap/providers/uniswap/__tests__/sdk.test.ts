@@ -2,6 +2,8 @@ import {
   type Address,
   decodeAbiParameters,
   decodeFunctionData,
+  encodeAbiParameters,
+  encodeFunctionData,
   type PublicClient,
   zeroAddress,
 } from 'viem'
@@ -15,6 +17,7 @@ import {
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { InvalidParamsError } from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 
 const USDC: Asset = {
@@ -61,6 +64,37 @@ function createMockPublicClient(
     }),
     readContract: vi.fn().mockResolvedValue(MOCK_SQRT_PRICE),
   } as unknown as PublicClient
+}
+
+type SimulatedQuoteParams = {
+  poolKey: { currency0: Address; currency1: Address }
+}
+
+function getFirstSimulatedQuoteParams(
+  publicClient: PublicClient,
+): SimulatedQuoteParams {
+  const call = vi.mocked(publicClient.simulateContract).mock.calls[0]?.[0]
+  if (!hasSimulatedQuoteParams(call)) {
+    throw new Error('Expected simulateContract call with quote params')
+  }
+  return call.args[0]
+}
+
+function hasSimulatedQuoteParams(
+  call: unknown,
+): call is { args: readonly [SimulatedQuoteParams] } {
+  if (!isRecord(call) || !Array.isArray(call.args)) return false
+  return isSimulatedQuoteParams(call.args[0])
+}
+
+function isSimulatedQuoteParams(value: unknown): value is SimulatedQuoteParams {
+  if (!isRecord(value) || !isRecord(value.poolKey)) return false
+  const { currency0, currency1 } = value.poolKey
+  return typeof currency0 === 'string' && typeof currency1 === 'string'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 describe('getQuote', () => {
@@ -142,8 +176,7 @@ describe('getQuote', () => {
       tickSpacing: TICK_SPACING,
     })
 
-    const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
+    const args = getFirstSimulatedQuoteParams(publicClient)
     // currency0 should be the lower address
     expect(
       args.poolKey.currency0.toLowerCase() <
@@ -165,8 +198,7 @@ describe('getQuote', () => {
       tickSpacing: TICK_SPACING,
     })
 
-    const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
+    const args = getFirstSimulatedQuoteParams(publicClient)
     // Native ETH should be address(0), sorted as currency0 (lowest possible address)
     expect(args.poolKey.currency0).toBe(zeroAddress)
   })
@@ -185,8 +217,7 @@ describe('getQuote', () => {
       tickSpacing: TICK_SPACING,
     })
 
-    const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
+    const args = getFirstSimulatedQuoteParams(publicClient)
     // Native ETH should be address(0) regardless of swap direction
     expect(args.poolKey.currency0).toBe(zeroAddress)
   })
@@ -483,5 +514,26 @@ describe('V4 recipient honoring (F046)', () => {
     // Decoding the bytes (not asserting against itself) recovers the exact
     // recipient, proving output is no longer silently sent to msg.sender.
     expect(decodeUniversalRouterRecipient(calldata)).toBe(OTHER_RECIPIENT)
+  })
+
+  it('rejects calldata that is not a single V4 swap command', () => {
+    const calldata = encodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: [
+        '0x08',
+        [
+          encodeAbiParameters(
+            [{ type: 'bytes' }, { type: 'bytes[]' }],
+            ['0x060c0e', ['0x', '0x', '0x']],
+          ),
+        ],
+        BigInt(1700000000),
+      ],
+    })
+
+    expect(() => decodeUniversalRouterRecipient(calldata)).toThrow(
+      InvalidParamsError,
+    )
   })
 })

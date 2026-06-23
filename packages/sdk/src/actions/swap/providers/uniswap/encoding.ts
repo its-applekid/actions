@@ -340,30 +340,74 @@ export function decodeUniversalRouterRecipient(swapCalldata: Hex): Address {
     abi: UNIVERSAL_ROUTER_ABI,
     data: swapCalldata,
   })
+  const commands = args[0] as Hex
   const inputs = args[1] as readonly Hex[]
+  if (commands !== `0x${V4_SWAP.toString(16).padStart(2, '0')}`) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Universal Router V4_SWAP command calldata',
+      received: commands,
+    })
+  }
+  if (inputs.length !== 1) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Universal Router V4_SWAP calldata with one input payload',
+      received: `${inputs.length} input payloads`,
+    })
+  }
   const [actions, actionParams] = decodeAbiParameters(
     [{ type: 'bytes' }, { type: 'bytes[]' }],
     inputs[0],
   )
 
-  // actions is a packed byte string (one byte per action); find the TAKE byte
-  // and decode the params slot at the same index.
   const actionBytes = (actions as Hex).slice(2)
-  for (let i = 0; i < actionBytes.length / 2; i++) {
-    const byte = parseInt(actionBytes.slice(i * 2, i * 2 + 2), 16)
-    if (byte === TAKE) {
-      const [, recipient] = decodeAbiParameters(
-        TAKE_PARAMS,
-        (actionParams as readonly Hex[])[i],
-      )
-      return recipient
-    }
+  const exactInActions = [SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE]
+  const exactOutActions = [SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE]
+  const parsedActions = parseActionBytes(actionBytes)
+  if (!actionsEqual(parsedActions, exactInActions, exactOutActions)) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'V4 exact-in or exact-out action list ending in TAKE',
+      received: actions as Hex,
+    })
   }
 
-  throw new InvalidParamsError({
-    param: 'swapCalldata',
-    expected: 'a V4 action list containing a TAKE action',
-  })
+  const params = actionParams as readonly Hex[]
+  if (params.length !== parsedActions.length) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'one V4 params payload per action',
+      received: `${params.length} params for ${parsedActions.length} actions`,
+    })
+  }
+
+  const [, recipient] = decodeAbiParameters(TAKE_PARAMS, params[2])
+  return recipient
+}
+
+function parseActionBytes(actionBytes: string): number[] {
+  return Array.from({ length: actionBytes.length / 2 }, (_, i) =>
+    parseInt(actionBytes.slice(i * 2, i * 2 + 2), 16),
+  )
+}
+
+function actionsEqual(
+  actual: readonly number[],
+  exactIn: readonly number[],
+  exactOut: readonly number[],
+): boolean {
+  return matchesActions(actual, exactIn) || matchesActions(actual, exactOut)
+}
+
+function matchesActions(
+  actual: readonly number[],
+  expected: readonly number[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((action, index) => action === expected[index])
+  )
 }
 
 function calculatePrice(

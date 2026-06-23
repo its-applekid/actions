@@ -16,6 +16,9 @@ import {
 } from '@/actions/swap/providers/velodrome/abis.js'
 import type { VelodromeRouterType } from '@/actions/swap/providers/velodrome/config.js'
 import {
+  assertSingleUniversalCommand,
+  assertSingleUniversalInput,
+  assertUniversalPayerIsUser,
   buildSwapPrice,
   resolveTokens,
 } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
@@ -320,11 +323,17 @@ export function decodeUniversalV2SwapRecipient(swapCalldata: Hex): Address {
     abi: UNIVERSAL_ROUTER_ABI,
     data: swapCalldata,
   })
+  const commands = args[0]
   const inputs = args[1]
-  const [recipient] = decodeAbiParameters(
-    V2_SWAP_EXACT_IN_INPUT_PARAMS,
-    inputs[0],
+  assertSingleUniversalCommand(
+    commands,
+    V2_SWAP_EXACT_IN,
+    'Velodrome universal V2_SWAP_EXACT_IN calldata',
   )
+  assertSingleUniversalInput(inputs)
+  const decoded = decodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, inputs[0])
+  const recipient = decoded[0]
+  assertUniversalPayerIsUser(decoded[4])
   return recipient
 }
 
