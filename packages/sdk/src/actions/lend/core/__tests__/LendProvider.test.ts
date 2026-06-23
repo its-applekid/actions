@@ -13,6 +13,7 @@ import type {
   LendMarket,
   LendMarketConfig,
   LendMarketId,
+  LendMarketPosition,
   LendOpenPositionParams,
   LendTransaction,
 } from '@/types/lend/index.js'
@@ -244,8 +245,7 @@ describe('LendProvider', () => {
     const approvalAmountHex = (result: LendTransaction): string =>
       (result.transactionData.approval?.data ?? '').slice(-64)
 
-    // 1000 USDC at 6 decimals = 1_000_000_000 = 0x3b9aca00
-    const EXACT_AMOUNT_HEX = '3b9aca00'
+    const EXACT_AMOUNT_HEX = (1000n * 10n ** 18n).toString(16)
     const MAX_UINT256_HEX = 'f'.repeat(64)
 
     it('defaults to "exact". approval encodes the required amount', async () => {
@@ -413,6 +413,15 @@ describe('LendProvider', () => {
     LendProvider.prototype.getMarkets.call(provider, params) as Promise<
       LendMarket[]
     >
+  const callGetPosition = (
+    provider: MockLendProvider,
+    marketId: LendMarketId,
+  ): Promise<LendMarketPosition> =>
+    LendProvider.prototype.getPosition.call(
+      provider,
+      WALLET,
+      marketId,
+    ) as Promise<LendMarketPosition>
 
   describe('openPosition asset symmetry (F008)', () => {
     const marketId: LendMarketId = { address: VAULT, chainId: 84532 }
@@ -449,6 +458,65 @@ describe('LendProvider', () => {
 
       expect(result.transactionData.approval?.to).toBe(MARKET_ASSET)
       expect(result.transactionData.position).toBeDefined()
+    })
+
+    it('uses the trusted market asset decimals when caller metadata is spoofed', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+      const spoofedAsset = {
+        ...assetAt(MARKET_ASSET),
+        metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+      }
+
+      const result = await callOpen(provider, {
+        amount: 1,
+        asset: spoofedAsset,
+        marketId,
+        walletAddress: WALLET,
+      })
+
+      expect(result.amount).toBe(1_000_000_000_000_000_000n)
+    })
+
+    it('uses the trusted market asset type when caller type is spoofed', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+      const spoofedNativeAsset: Asset = {
+        ...assetAt(MARKET_ASSET),
+        type: 'native',
+      }
+
+      const result = await callOpen(provider, {
+        amount: 1,
+        asset: spoofedNativeAsset,
+        marketId,
+        walletAddress: WALLET,
+      })
+
+      expect(result.transactionData.approval).toBeDefined()
+      expect(result.transactionData.approval?.to).toBe(MARKET_ASSET)
+    })
+
+    it('uses the trusted market asset decimals on closePosition when caller metadata is spoofed', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+      const spoofedAsset = {
+        ...assetAt(MARKET_ASSET),
+        metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+      }
+
+      const result = await callClose(provider, {
+        amount: 1,
+        asset: spoofedAsset,
+        marketId,
+        walletAddress: WALLET,
+      })
+
+      expect(result.amount).toBe(1_000_000_000_000_000_000n)
+      expect(result.assetAddress).toBe(MARKET_ASSET)
     })
   })
 
@@ -487,6 +555,12 @@ describe('LendProvider', () => {
         callGetMarket(blockedProvider(), { address: VAULT, chainId: 84532 }),
       ).rejects.toBeInstanceOf(MarketNotAllowedError)
     })
+
+    it('rejects a blocklisted market on getPosition even when allowlisted', async () => {
+      await expect(
+        callGetPosition(blockedProvider(), marketId),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
   })
 
   describe('empty/undefined allowlist fails closed (F081)', () => {
@@ -509,6 +583,12 @@ describe('LendProvider', () => {
           address: VAULT,
           chainId: 84532,
         }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('rejects getPosition (read path) when no allowlist is configured', async () => {
+      await expect(
+        callGetPosition(new MockLendProvider(), marketId),
       ).rejects.toBeInstanceOf(MarketNotAllowedError)
     })
 

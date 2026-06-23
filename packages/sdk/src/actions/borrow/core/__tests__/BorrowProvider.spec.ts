@@ -291,6 +291,17 @@ describe('BorrowProvider - openPosition', () => {
       }),
     ).rejects.toBeInstanceOf(MarketNotAllowedError)
   })
+
+  it('rejects when no allowlist is configured', async () => {
+    const provider = makeProvider({})
+    await expect(
+      provider.openPosition({
+        market,
+        walletAddress,
+        borrowAmount: { amount: 1 },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+  })
 })
 
 describe('BorrowProvider - closePosition', () => {
@@ -441,10 +452,25 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
     ).rejects.toBeInstanceOf(MarketNotAllowedError)
   })
 
+  it('getMarket rejects a blocklisted market even when allowlisted', async () => {
+    provider = makeProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    await expect(provider.getMarket(market)).rejects.toBeInstanceOf(
+      MarketNotAllowedError,
+    )
+  })
+
   it('getMarkets filters by chainId from the allowlist', async () => {
     provider = makeProvider({ marketAllowlist: [market, otherMarket] })
     const markets = await provider.getMarkets({ chainId: BASE_SEPOLIA_ID })
     expect(markets).toHaveLength(2)
+  })
+
+  it('getMarkets returns no markets when no allowlist is configured', async () => {
+    provider = makeProvider({})
+    await expect(provider.getMarkets()).resolves.toEqual([])
   })
 
   it('getMarkets filters by collateralAsset', async () => {
@@ -499,6 +525,21 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
       provider.getMarkets({
         borrowAsset: collateralAsset,
         markets: [market],
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('getMarkets still applies chainId filters to caller-supplied allowlisted markets', async () => {
+    const otherChainMarket: BorrowMarketConfig = {
+      ...otherMarket,
+      chainId: 1 as SupportedChainId,
+    }
+    provider = makeProvider({ marketAllowlist: [market, otherChainMarket] })
+
+    await expect(
+      provider.getMarkets({
+        chainId: BASE_SEPOLIA_ID,
+        markets: [otherChainMarket],
       }),
     ).resolves.toEqual([])
   })

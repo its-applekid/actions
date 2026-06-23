@@ -12,7 +12,6 @@ import {
 } from '@/actions/shared/marketConfigs.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
-  AssetMetadataRequiredError,
   MarketIdRequiredError,
   MarketNotAllowedError,
 } from '@/core/error/errors.js'
@@ -94,19 +93,21 @@ export abstract class LendProvider<
       chainId: params.marketId.chainId,
     })
     validateMarketAsset(market, params.asset)
+    const trustedAsset = market.asset
 
-    // Convert human-readable amount to wei using the asset's decimals
-    const amountWei = parseAssetAmount(params.asset, params.amount)
+    // Convert human-readable amount to wei using the market asset's decimals.
+    const amountWei = parseAssetAmount(trustedAsset, params.amount)
 
     const position = await this._openPosition({
       ...params,
+      asset: trustedAsset,
       amountWei,
       walletAddress: params.walletAddress,
     })
 
     // Native deposits send ETH inline as msg.value; no approval is needed.
     // ERC-20 deposits resolve approval mode and build an approve(spender, amount) tx.
-    const approval = isNativeAsset(params.asset)
+    const approval = isNativeAsset(trustedAsset)
       ? undefined
       : this.buildLendApproval({
           position,
@@ -219,20 +220,13 @@ export abstract class LendProvider<
     if (params.asset) {
       validateMarketAsset(market, params.asset)
     }
+    const trustedAsset = market.asset
 
-    const assetMetadata = params.asset?.metadata
-    if (!assetMetadata) {
-      throw new AssetMetadataRequiredError('decimal conversion')
-    }
-
-    // Convert human-readable amount to wei using the asset's decimals
-    const amountWei = parseAssetAmount(
-      params.asset ?? market.asset,
-      params.amount,
-    )
+    // Convert human-readable amount to wei using the market asset's decimals.
+    const amountWei = parseAssetAmount(trustedAsset, params.amount)
 
     return this._closePosition({
-      asset: params.asset,
+      asset: trustedAsset,
       amount: amountWei,
       marketId: params.marketId,
       walletAddress: params.walletAddress,

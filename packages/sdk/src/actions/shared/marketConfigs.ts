@@ -1,5 +1,12 @@
 /**
  * Find the first config that matches a target value.
+ * @description Shared identity lookup for market config lists. Callers provide
+ * the domain-specific comparator so the helper does not know about a market's
+ * address, chain, kind, or provider fields.
+ * @param configs - Candidate configs to search
+ * @param target - Value to compare against each config
+ * @param matches - Domain-specific comparator
+ * @returns The first matching config, or undefined when no config matches
  */
 export function findMatchingConfig<TConfig, TTarget>(params: {
   configs: readonly TConfig[] | undefined
@@ -11,6 +18,8 @@ export function findMatchingConfig<TConfig, TTarget>(params: {
 
 /**
  * Filter configs by a list of optional predicates.
+ * @description Applies each defined predicate in order and skips undefined
+ * predicates so callers can build filter arrays from optional request fields.
  * @param configs - Candidate configs
  * @param predicates - Predicates to apply when defined
  * @returns Filtered configs
@@ -28,6 +37,9 @@ export function filterMatchingConfigs<TConfig>(
 
 /**
  * Intersect candidate configs with an allowlist and drop blocklisted matches.
+ * @description Returns allowlist entries matched by candidates, never the
+ * candidate objects themselves. This keeps caller-supplied overrides from
+ * smuggling untrusted config metadata into read paths.
  * @param candidates - Candidate configs to filter
  * @param allowlist - Trusted configs candidates must match
  * @param blocklist - Trusted configs candidates must not match

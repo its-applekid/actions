@@ -107,22 +107,41 @@ export function selectAllowlistedBorrowMarketConfigs(
 }
 
 /**
- * Validate that at least one configured borrow provider's allowlist
- * contains the supplied `marketId`. Used to gate dispatch of pre-built
- * quotes that arrive from untrusted (or stale) callers.
+ * Validate that at least one configured borrow provider allows the supplied
+ * `marketId` and no provider blocklists it.
+ * @description Used to gate dispatch of pre-built quotes that arrive from
+ * untrusted or stale callers before wallet send/sendBatch execution.
+ * @param marketId - Borrow market identifier from the pre-built quote
+ * @param providers - Configured borrow providers to check
+ * @throws MarketNotAllowedError when a provider blocklists the market
+ * @throws ProviderNotConfiguredError when no provider allowlists the market
  */
 export function validateBorrowMarketIdInAnyAllowlist(
   marketId: BorrowMarketId,
   providers: ReadonlyArray<{ config: BorrowProviderConfig }>,
 ): void {
   for (const provider of providers) {
-    if (
-      findMatchingConfig({
-        configs: provider.config.marketAllowlist,
-        target: marketId,
-        matches: marketIdMatches,
+    const blocked = findMatchingConfig({
+      configs: provider.config.marketBlocklist,
+      target: marketId,
+      matches: marketIdMatches,
+    })
+    if (blocked) {
+      throw new MarketNotAllowedError({
+        address: marketId.marketId,
+        chainId: marketId.chainId,
+        reason: 'Market is on the marketBlocklist',
       })
-    ) {
+    }
+  }
+
+  for (const provider of providers) {
+    const allowed = findMatchingConfig({
+      configs: provider.config.marketAllowlist,
+      target: marketId,
+      matches: marketIdMatches,
+    })
+    if (allowed) {
       return
     }
   }

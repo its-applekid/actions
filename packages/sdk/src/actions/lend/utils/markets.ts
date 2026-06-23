@@ -4,7 +4,6 @@ import {
   findMatchingConfig,
   selectAllowedConfigs,
 } from '@/actions/shared/marketConfigs.js'
-import type { SupportedChainId } from '@/constants/supportedChains.js'
 import { MarketNotAllowedError } from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type {
@@ -59,10 +58,8 @@ export function findMarketInAllowlist(
  */
 export function validateMarketAsset(market: LendMarket, asset: Asset): void {
   if (!isMarketAsset(market, asset)) {
-    const marketAssetAddress =
-      market.asset.address[market.marketId.chainId as SupportedChainId]
-    const providedAssetAddress =
-      asset.address[market.marketId.chainId as SupportedChainId]
+    const marketAssetAddress = market.asset.address[market.marketId.chainId]
+    const providedAssetAddress = asset.address[market.marketId.chainId]
     throw new MarketNotAllowedError({
       address: market.marketId.address,
       chainId: market.marketId.chainId,
@@ -84,7 +81,7 @@ export function validateMarketAsset(market: LendMarket, asset: Asset): void {
  * rather than a hex address, so they compare by identity.
  */
 export function isMarketAsset(market: LendMarket, asset: Asset): boolean {
-  const chainId = market.marketId.chainId as SupportedChainId
+  const chainId = market.marketId.chainId
   const marketAssetAddress = market.asset.address[chainId]
   const providedAssetAddress = asset.address[chainId]
 
@@ -100,6 +97,8 @@ export function isMarketAsset(market: LendMarket, asset: Asset): boolean {
 /**
  * Intersect a list of candidate market configs with the provider's allowlist
  * and drop any that are blocklisted.
+ * @description Caller-supplied market configs can only narrow configured
+ * allowlists. The returned configs are always the trusted allowlist entries.
  * @param candidates - Market configs to filter (e.g. a caller-supplied
  * `getMarkets({ markets })` override, or the allowlist pre-filtered by
  * chain/asset)
