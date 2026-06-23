@@ -182,9 +182,9 @@ describe('AaveLendProvider', () => {
     })
 
     it('should handle lending errors', async () => {
-      vi.mocked(aaveSdk.getReserve).mockRejectedValueOnce(
-        new Error('Market fetch failed'),
-      )
+      vi.mocked(aaveSdk.getReserve)
+        .mockResolvedValueOnce(createMockAaveReserve())
+        .mockRejectedValueOnce(new Error('Market fetch failed'))
 
       const asset = MockAaveUSDCAsset
       const amount = 1000

@@ -2,6 +2,7 @@ import type { Address } from 'viem'
 
 import {
   lendMarketIdMatches,
+  selectAllowedLendMarkets,
   validateMarketAsset,
 } from '@/actions/lend/utils/markets.js'
 import { BaseActionProvider } from '@/actions/shared/BaseActionProvider.js'
@@ -86,6 +87,14 @@ export abstract class LendProvider<
 
     this.validateMarketAllowed(params.marketId)
 
+    // Mirror closePosition's asset guard before building any approval or
+    // deposit, so a mismatched asset can never reach signed approve() calldata.
+    const market = await this.getMarket({
+      address: params.marketId.address,
+      chainId: params.marketId.chainId,
+    })
+    validateMarketAsset(market, params.asset)
+
     // Convert human-readable amount to wei using the asset's decimals
     const amountWei = parseAssetAmount(params.asset, params.amount)
 
@@ -141,15 +150,15 @@ export abstract class LendProvider<
   async getMarkets(params: GetLendMarketsParams = {}): Promise<LendMarket[]> {
     if (params.chainId !== undefined) this.assertChainSupported(params.chainId)
 
-    const filteredMarkets = this.filterMarketConfigs(
-      params.chainId,
-      params.asset,
-    )
+    // A caller-supplied `markets[]` override can narrow the configured
+    // allowlist, but cannot expand it or re-enable a blocklisted market.
+    const candidates =
+      params.markets ?? this.filterMarketConfigs(params.chainId, params.asset)
 
     return this._getMarkets({
       asset: params.asset,
       chainId: params.chainId,
-      markets: params.markets || filteredMarkets,
+      markets: selectAllowedLendMarkets(candidates, this._config),
     })
   }
 
@@ -227,18 +236,33 @@ export abstract class LendProvider<
   }
 
   /**
-   * Validate that a market is in the config's market allowlist
+   * Validate that a market is allowed for this provider.
    * @param marketId - Market identifier containing address and chainId
-   * @throws Error if market allowlist is configured but market is not in it
+   * @throws MarketNotAllowedError when the market is blocklisted, or when it is
+   * absent from the allowlist. An empty/undefined `marketAllowlist` fails closed
+   * (permits nothing): the signing path (open/close) then matches the read path.
+   * `getVault`/`getReserve` already throw when no allowlist resolves the market,
+   * and the borrow surface does the same, so an empty allowlist is never a silent
+   * allow-all.
    */
   protected validateMarketAllowed(marketId: LendMarketId): void {
     this.assertChainSupported(marketId.chainId)
 
-    if (
-      !this._config.marketAllowlist ||
-      this._config.marketAllowlist.length === 0
-    ) {
-      return
+    // Blocklist takes precedence: a blocklisted market is rejected even when it
+    // also appears in the allowlist.
+    if (this._config.marketBlocklist?.length) {
+      const blocked = findMatchingConfig({
+        configs: this._config.marketBlocklist,
+        target: marketId,
+        matches: lendMarketIdMatches,
+      })
+      if (blocked) {
+        throw new MarketNotAllowedError({
+          address: marketId.address,
+          chainId: marketId.chainId,
+          reason: 'Market is on the marketBlocklist',
+        })
+      }
     }
 
     const foundMarket = findMatchingConfig({

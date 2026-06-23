@@ -8,6 +8,7 @@ import {
 } from '@/actions/lend/__mocks__/MockMarkets.js'
 import { createMockMorphoVault } from '@/actions/lend/providers/morpho/__mocks__/mockVault.js'
 import { MorphoLendProvider } from '@/actions/lend/providers/morpho/MorphoLendProvider.js'
+import { MarketNotAllowedError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { LendProviderConfig } from '@/types/actions.js'
@@ -213,16 +214,17 @@ describe('MorphoLendProvider', () => {
     })
 
     it('should handle lending errors', async () => {
-      vi.spyOn(provider as any, '_getMarket').mockRejectedValueOnce(
-        new Error('Market fetch failed'),
-      )
-
       const asset = MockGauntletUSDCMarket.asset
       const amount = 1000
       const marketId = {
         address: MockGauntletUSDCMarket.address,
         chainId: MockGauntletUSDCMarket.chainId,
       }
+      const market = await provider.getMarket(marketId)
+
+      vi.spyOn(provider as any, '_getMarket')
+        .mockResolvedValueOnce(market)
+        .mockRejectedValueOnce(new Error('Market fetch failed'))
 
       await expect(
         provider.openPosition({
@@ -274,38 +276,18 @@ describe('MorphoLendProvider', () => {
       expect(position.balanceFormatted).toBe('1')
     })
 
-    it('falls back to on-chain asset() + decimals() when no allowlist match', async () => {
+    it('rejects position lookup when no allowlist is configured', async () => {
       const providerWithoutAllowlist = new MorphoLendProvider(
         {},
         mockChainManager,
       )
-      const client = mockChainManager.getPublicClient(
-        MockGauntletUSDCMarket.chainId,
-      )
-      const underlyingAddr = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd'
-      const onchainDecimals = 8 // simulate a non-USDC underlying
-      const shares = 10n ** 18n
-      const underlyingBalance = 10n ** 8n
-      vi.mocked(client.readContract)
-        // resolveUnderlyingDecimals: asset()
-        .mockResolvedValueOnce(underlyingAddr)
-        // resolveUnderlyingDecimals: decimals()
-        .mockResolvedValueOnce(onchainDecimals)
-        // balanceOf
-        .mockResolvedValueOnce(shares)
-        // convertToAssets
-        .mockResolvedValueOnce(underlyingBalance)
 
-      const position = await providerWithoutAllowlist.getPosition(
-        MockReceiverAddress,
-        {
+      await expect(
+        providerWithoutAllowlist.getPosition(MockReceiverAddress, {
           address: MockGauntletUSDCMarket.address,
           chainId: MockGauntletUSDCMarket.chainId,
-        },
-      )
-
-      expect(position.balanceFormatted).toBe('1')
-      expect(position.sharesFormatted).toBe('1')
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
     })
   })
 

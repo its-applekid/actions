@@ -4,13 +4,42 @@ import { describe, expect, it } from 'vitest'
 import { MockUSDCAsset } from '@/__mocks__/MockAssets.js'
 import { MockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
 import { LendProvider } from '@/actions/lend/core/LendProvider.js'
+import { MarketNotAllowedError } from '@/core/error/errors.js'
+import type { Asset } from '@/types/asset.js'
 import type {
+  ClosePositionParams,
+  GetLendMarketParams,
+  GetLendMarketsParams,
+  LendMarket,
   LendMarketConfig,
   LendMarketId,
   LendOpenPositionParams,
   LendTransaction,
 } from '@/types/lend/index.js'
 import { validateChainSupported } from '@/utils/validation.js'
+
+// Address the MockLendProvider's `createMockMarket` reports as the market
+// underlying for every chain. The new open-path asset guard compares the
+// caller asset against this, so a matching open must use it.
+const MARKET_ASSET = '0x0000000000000000000000000000000000000001' as Address
+const VAULT = '0x2222222222222222222222222222222222222222' as Address
+const OTHER_VAULT = '0x4444444444444444444444444444444444444444' as Address
+const WETH = '0x4200000000000000000000000000000000000006' as Address
+const WALLET = '0x3333333333333333333333333333333333333333' as Address
+
+const assetAt = (address: Address): Asset => ({
+  address: { 84532: address },
+  metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+  type: 'erc20',
+})
+
+const marketConfig = (address: Address): LendMarketConfig => ({
+  address,
+  chainId: 84532,
+  name: 'Configured Market',
+  asset: assetAt(MARKET_ASSET),
+  lendProvider: 'morpho',
+})
 
 // Test helper class that exposes protected validation methods as public
 class TestLendProvider extends MockLendProvider {
@@ -174,9 +203,12 @@ describe('LendProvider', () => {
   })
 
   describe('approvalMode resolution', () => {
+    // The caller asset must match the market's resolved underlying
+    // (MARKET_ASSET) now that openPosition guards the asset, and the market
+    // must be allowlisted now that the allowlist fails closed.
     const mockAsset = {
       address: {
-        84532: '0x1111111111111111111111111111111111111111' as Address,
+        84532: MARKET_ASSET,
       },
       metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
       type: 'erc20' as const,
@@ -185,11 +217,12 @@ describe('LendProvider', () => {
       amount: 1000,
       asset: mockAsset,
       marketId: {
-        address: '0x2222222222222222222222222222222222222222' as Address,
+        address: VAULT,
         chainId: 84532,
       } as LendMarketId,
-      walletAddress: '0x3333333333333333333333333333333333333333' as Address,
+      walletAddress: WALLET,
     }
+    const allowlist: LendMarketConfig[] = [marketConfig(VAULT)]
 
     // MockLendProvider replaces `openPosition` with a vi.fn() in its
     // constructor. To exercise the real base-class flow (which builds the
@@ -212,7 +245,7 @@ describe('LendProvider', () => {
     const MAX_UINT256_HEX = 'f'.repeat(64)
 
     it('defaults to "exact". approval encodes the required amount', async () => {
-      const provider = new MockLendProvider()
+      const provider = new MockLendProvider({ marketAllowlist: allowlist })
       const result = await callBaseOpenPosition(provider, baseParams)
       expect(approvalAmountHex(result).replace(/^0+/, '')).toBe(
         EXACT_AMOUNT_HEX,
@@ -220,7 +253,7 @@ describe('LendProvider', () => {
     })
 
     it('honours per-call "max" override. approval uses maxUint256', async () => {
-      const provider = new MockLendProvider()
+      const provider = new MockLendProvider({ marketAllowlist: allowlist })
       const result = await callBaseOpenPosition(provider, {
         ...baseParams,
         approvalMode: 'max',
@@ -229,13 +262,19 @@ describe('LendProvider', () => {
     })
 
     it('honours per-provider config approvalMode default', async () => {
-      const provider = new MockLendProvider({ approvalMode: 'max' })
+      const provider = new MockLendProvider({
+        marketAllowlist: allowlist,
+        approvalMode: 'max',
+      })
       const result = await callBaseOpenPosition(provider, baseParams)
       expect(approvalAmountHex(result)).toBe(MAX_UINT256_HEX)
     })
 
     it('per-call override beats per-provider config', async () => {
-      const provider = new MockLendProvider({ approvalMode: 'max' })
+      const provider = new MockLendProvider({
+        marketAllowlist: allowlist,
+        approvalMode: 'max',
+      })
       const result = await callBaseOpenPosition(provider, {
         ...baseParams,
         approvalMode: 'exact',
@@ -334,6 +373,188 @@ describe('LendProvider', () => {
     it('should return undefined for marketAllowlist when not provided', () => {
       const provider = new MockLendProvider()
       expect(provider.config.marketAllowlist).toBeUndefined()
+    })
+  })
+
+  // Bypass MockLendProvider's vi.fn() public-method stubs to exercise the real
+  // base-class flow (allowlist/blocklist/asset guards) the providers inherit.
+  const callOpen = (
+    provider: MockLendProvider,
+    params: LendOpenPositionParams,
+  ): Promise<LendTransaction> =>
+    LendProvider.prototype.openPosition.call(
+      provider,
+      params,
+    ) as Promise<LendTransaction>
+  const callClose = (
+    provider: MockLendProvider,
+    params: ClosePositionParams,
+  ): Promise<LendTransaction> =>
+    LendProvider.prototype.closePosition.call(
+      provider,
+      params,
+    ) as Promise<LendTransaction>
+  const callGetMarket = (
+    provider: MockLendProvider,
+    params: GetLendMarketParams,
+  ): Promise<LendMarket> =>
+    LendProvider.prototype.getMarket.call(
+      provider,
+      params,
+    ) as Promise<LendMarket>
+  const callGetMarkets = (
+    provider: MockLendProvider,
+    params: GetLendMarketsParams = {},
+  ): Promise<LendMarket[]> =>
+    LendProvider.prototype.getMarkets.call(provider, params) as Promise<
+      LendMarket[]
+    >
+
+  describe('openPosition asset symmetry (F008)', () => {
+    const marketId: LendMarketId = { address: VAULT, chainId: 84532 }
+
+    it('throws MarketNotAllowedError and never builds an approval when the caller asset does not match the market underlying', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+
+      // WETH != the vault's underlying (MARKET_ASSET). Mirrors the wrong-token
+      // max-mode approval hazard: this must reject before any approve() is built.
+      await expect(
+        callOpen(provider, {
+          amount: 1000,
+          asset: assetAt(WETH),
+          marketId,
+          walletAddress: WALLET,
+          approvalMode: 'max',
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('succeeds and approves the correct token when the caller asset matches the market underlying', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+
+      const result = await callOpen(provider, {
+        amount: 1000,
+        asset: assetAt(MARKET_ASSET),
+        marketId,
+        walletAddress: WALLET,
+      })
+
+      expect(result.transactionData.approval?.to).toBe(MARKET_ASSET)
+      expect(result.transactionData.position).toBeDefined()
+    })
+  })
+
+  describe('marketBlocklist enforcement (F010)', () => {
+    const marketId: LendMarketId = { address: VAULT, chainId: 84532 }
+    const blockedProvider = () =>
+      new MockLendProvider({
+        // Listed in BOTH: the blocklist must win.
+        marketAllowlist: [marketConfig(VAULT)],
+        marketBlocklist: [marketConfig(VAULT)],
+      })
+
+    it('rejects a blocklisted market on openPosition even when allowlisted', async () => {
+      await expect(
+        callOpen(blockedProvider(), {
+          amount: 1,
+          asset: assetAt(MARKET_ASSET),
+          marketId,
+          walletAddress: WALLET,
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('rejects a blocklisted market on closePosition even when allowlisted', async () => {
+      await expect(
+        callClose(blockedProvider(), {
+          amount: 1,
+          marketId,
+          walletAddress: WALLET,
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('rejects a blocklisted market on getMarket even when allowlisted', async () => {
+      await expect(
+        callGetMarket(blockedProvider(), { address: VAULT, chainId: 84532 }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+  })
+
+  describe('empty/undefined allowlist fails closed (F081)', () => {
+    const marketId: LendMarketId = { address: VAULT, chainId: 84532 }
+
+    it('rejects openPosition (write path) when no allowlist is configured', async () => {
+      await expect(
+        callOpen(new MockLendProvider(), {
+          amount: 1,
+          asset: assetAt(MARKET_ASSET),
+          marketId,
+          walletAddress: WALLET,
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('rejects getMarket (read path) when no allowlist is configured, matching the write path', async () => {
+      await expect(
+        callGetMarket(new MockLendProvider(), {
+          address: VAULT,
+          chainId: 84532,
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('rejects closePosition (write path) when no allowlist is configured', async () => {
+      await expect(
+        callClose(new MockLendProvider(), {
+          amount: 1,
+          asset: assetAt(MARKET_ASSET),
+          marketId,
+          walletAddress: WALLET,
+        }),
+      ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    })
+
+    it('returns no markets from getMarkets (read list path) when no allowlist is configured', async () => {
+      await expect(callGetMarkets(new MockLendProvider())).resolves.toEqual([])
+    })
+
+    it('rejects when the allowlist is present but empty', () => {
+      const provider = new TestLendProvider({ marketAllowlist: [] })
+      expect(() => provider.validateMarketAllowed(marketId)).toThrow(
+        MarketNotAllowedError,
+      )
+    })
+  })
+
+  describe('getMarkets({ markets }) override is constrained to the allowlist (F102)', () => {
+    it('does not surface a caller-supplied market that is not allowlisted', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+
+      const markets = await callGetMarkets(provider, {
+        markets: [marketConfig(OTHER_VAULT)],
+      })
+
+      expect(markets).toEqual([])
+    })
+
+    it('still surfaces a caller-supplied market that is allowlisted', async () => {
+      const provider = new MockLendProvider({
+        marketAllowlist: [marketConfig(VAULT)],
+      })
+
+      const markets = await callGetMarkets(provider, {
+        markets: [marketConfig(VAULT)],
+      })
+
+      expect(markets).toHaveLength(1)
+      expect(markets[0].marketId.address).toBe(VAULT)
     })
   })
 })

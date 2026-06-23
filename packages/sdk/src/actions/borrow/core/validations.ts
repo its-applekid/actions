@@ -1,5 +1,8 @@
 import { marketIdMatches } from '@/actions/borrow/core/markets.js'
-import { findMatchingConfig } from '@/actions/shared/marketConfigs.js'
+import {
+  findMatchingConfig,
+  selectAllowedConfigs,
+} from '@/actions/shared/marketConfigs.js'
 import {
   InvalidParamsError,
   MarketNotAllowedError,
@@ -35,7 +38,7 @@ export function validateQuoteAction(
  * trusted `BorrowMarketConfig` or throws `MarketNotAllowedError`.
  * @description Empty/undefined allowlists fail closed. Blocklist matches
  * are rejected with a distinct reason. Used by `BorrowProvider` to
- * resolve marketId → full config once on both read and write paths so
+ * resolve marketId to full config once on both read and write paths so
  * concrete providers don't repeat the lookup and so blocklist semantics
  * apply uniformly.
  */
@@ -73,6 +76,34 @@ export function requireAllowlistedBorrowMarketConfig(
     }
   }
   return match
+}
+
+/**
+ * Intersect a list of candidate market configs with the allowlist and drop any
+ * that are blocklisted.
+ * @description The read-path twin of `requireAllowlistedBorrowMarketConfig`:
+ * it filters instead of throwing so a list endpoint silently drops misses.
+ * Returns the matched **allowlist** entries (not the candidate objects), so a
+ * caller-supplied `getMarkets({ markets })` override can only narrow the
+ * allowlisted set. It can never surface an off-allowlist reserve, smuggle a
+ * tampered config onto the read path, or return a blocklisted market.
+ * @param candidates - Market configs to filter
+ * @param config - Provider allowlist/blocklist
+ * @returns Allowlisted, non-blocklisted market configs matched from `candidates`
+ */
+export function selectAllowlistedBorrowMarketConfigs(
+  candidates: readonly BorrowMarketConfig[],
+  config: {
+    marketAllowlist?: readonly BorrowMarketConfig[]
+    marketBlocklist?: readonly BorrowMarketConfig[]
+  },
+): BorrowMarketConfig[] {
+  return selectAllowedConfigs({
+    candidates,
+    allowlist: config.marketAllowlist,
+    blocklist: config.marketBlocklist,
+    matches: marketIdMatches,
+  })
 }
 
 /**
