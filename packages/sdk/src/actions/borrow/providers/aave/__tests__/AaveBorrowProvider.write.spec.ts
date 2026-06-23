@@ -364,11 +364,44 @@ describe('AaveBorrowProvider write layer', () => {
     })
     expect(quote.execution.transactions).toHaveLength(2)
     expect(quote.execution.approvalsSkipped).toBe(false)
+    expect(quote.execution.transactions[0].to).toBe(A_WETH)
+    expect(quote.execution.providerContext?.aTokenAddress).toBe(A_WETH)
     const withdraw = decodeFunctionData({
       abi: WETH_GATEWAY_ABI,
       data: quote.execution.transactions[1].data,
     })
     expect(withdraw.functionName).toBe('withdrawETH')
+  })
+
+  it('rejects a native withdraw gateway approval for a non-aToken', async () => {
+    const provider = makeProvider({
+      collateral: 10n ** 18n,
+      debt: 1_000_000_000n,
+      allowance: 0n,
+    })
+    const quote = await provider.withdrawCollateral({
+      market,
+      walletAddress: WALLET,
+      amount: { amountRaw: 5n * 10n ** 17n },
+    })
+    const approval = quote.execution.transactions[0]
+    if (!approval) throw new Error('expected approval transaction')
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: {
+            ...quote.execution,
+            transactions: [
+              { ...approval, to: WBTC },
+              ...quote.execution.transactions.slice(1),
+            ],
+          },
+        },
+        WALLET,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
   })
 
   it('bounds the exact-mode aToken approval to live collateral on a max withdraw', async () => {

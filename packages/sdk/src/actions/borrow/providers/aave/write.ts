@@ -110,11 +110,14 @@ export async function buildAaveCollateralDeposit(
  */
 export async function buildAaveCollateralWithdraw(
   params: AaveWriteContext & { amount: bigint; isMax: boolean },
-): Promise<TransactionData[]> {
+): Promise<{
+  txs: TransactionData[]
+  gatewayApprovalToken?: Address
+}> {
   const { client, config, amount, isMax, user, approvalMode } = params
   const onChainAmount = isMax ? maxUint256 : amount
   if (!config.aave.collateralUsesWethGateway) {
-    return [encodeAaveWithdraw(config, onChainAmount, user)]
+    return { txs: [encodeAaveWithdraw(config, onChainAmount, user)] }
   }
   const gateway = requireAaveWethGatewayAddress(config.chainId)
   const { aToken } = await fetchAaveReserveTokens(client, config)
@@ -131,7 +134,7 @@ export async function buildAaveCollateralWithdraw(
   const txs: TransactionData[] = []
   if (approvalTx) txs.push(approvalTx)
   txs.push(encodeAaveWithdrawETH(config, onChainAmount, user))
-  return txs
+  return { txs, gatewayApprovalToken: aToken }
 }
 
 /**

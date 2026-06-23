@@ -2,6 +2,7 @@ import {
   type Address,
   decodeFunctionData,
   erc20Abi,
+  isAddress,
   isAddressEqual,
 } from 'viem'
 
@@ -9,6 +10,7 @@ import {
   assertAddressField,
   assertAmountField,
   assertBorrowAction,
+  failCalldata,
 } from '@/actions/borrow/core/calldataValidation.js'
 import {
   requireAavePoolAddress,
@@ -34,7 +36,7 @@ export function isAaveApprovalCall(
     })
     if (decoded.functionName !== 'approve') return false
     assertAmountField('value', transaction.value, 0n)
-    assertTrustedApproval(transaction.to, decoded.args[0], quote.action, market)
+    assertTrustedApproval(transaction.to, decoded.args[0], quote, market)
     return true
   } catch (error) {
     if (error instanceof QuoteCalldataMismatchError) throw error
@@ -45,17 +47,27 @@ export function isAaveApprovalCall(
 function assertTrustedApproval(
   token: Address,
   spender: Address,
-  action: BorrowAction,
+  quote: BorrowQuote,
   market: AaveBorrowMarketConfig,
 ): void {
   const pool = requireAavePoolAddress(market.chainId)
   const gateway = requireAaveWethGatewayAddress(market.chainId)
   if (isAddressEqual(spender, pool)) {
-    assertPoolApprovalToken(token, action, market)
+    assertPoolApprovalToken(token, quote.action, market)
     return
   }
   assertAddressField('approval spender', spender, gateway)
-  assertBorrowAction(action, ['withdrawCollateral', 'close'], 'approve')
+  assertAddressField('approval token', token, gatewayApprovalToken(quote))
+  assertBorrowAction(quote.action, ['withdrawCollateral', 'close'], 'approve')
+}
+
+function gatewayApprovalToken(quote: BorrowQuote): Address {
+  const token = quote.execution.providerContext?.aTokenAddress
+  if (typeof token === 'string' && isAddress(token)) return token
+  failCalldata('providerContext.aTokenAddress', {
+    expected: 'aToken address',
+    received: String(token),
+  })
 }
 
 function assertPoolApprovalToken(
