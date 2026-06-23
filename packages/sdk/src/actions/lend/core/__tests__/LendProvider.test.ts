@@ -33,11 +33,14 @@ const assetAt = (address: Address): Asset => ({
   type: 'erc20',
 })
 
-const marketConfig = (address: Address): LendMarketConfig => ({
+const marketConfig = (
+  address: Address,
+  overrides: Partial<Pick<LendMarketConfig, 'asset' | 'chainId'>> = {},
+): LendMarketConfig => ({
   address,
-  chainId: 84532,
+  chainId: overrides.chainId ?? 84532,
   name: 'Configured Market',
-  asset: assetAt(MARKET_ASSET),
+  asset: overrides.asset ?? assetAt(MARKET_ASSET),
   lendProvider: 'morpho',
 })
 
@@ -555,6 +558,35 @@ describe('LendProvider', () => {
 
       expect(markets).toHaveLength(1)
       expect(markets[0].marketId.address).toBe(VAULT)
+    })
+
+    it('still applies chain and asset filters to caller-supplied allowlisted markets', async () => {
+      const requestedAsset = assetAt(MARKET_ASSET)
+      const otherAsset = assetAt(WETH)
+      const allowedMarket = marketConfig(VAULT, { asset: requestedAsset })
+      const otherChainMarket = marketConfig(OTHER_VAULT, {
+        asset: requestedAsset,
+        chainId: 8453,
+      })
+      const otherAssetMarket = marketConfig(OTHER_VAULT, {
+        asset: otherAsset,
+      })
+      const provider = new MockLendProvider({
+        marketAllowlist: [allowedMarket, otherChainMarket, otherAssetMarket],
+      })
+
+      await expect(
+        callGetMarkets(provider, {
+          chainId: 84532,
+          markets: [otherChainMarket],
+        }),
+      ).resolves.toEqual([])
+      await expect(
+        callGetMarkets(provider, {
+          asset: requestedAsset,
+          markets: [otherAssetMarket],
+        }),
+      ).resolves.toEqual([])
     })
   })
 })

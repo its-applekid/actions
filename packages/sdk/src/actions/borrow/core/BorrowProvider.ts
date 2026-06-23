@@ -221,7 +221,12 @@ export abstract class BorrowProvider<
     if (params.chainId !== undefined) {
       this.assertChainSupported(params.chainId)
     }
-    const filtered = filterMatchingConfigs(this._config.marketAllowlist, [
+    const candidates = params.markets ?? this._config.marketAllowlist ?? []
+    const allowedMarkets = selectAllowlistedBorrowMarketConfigs(
+      candidates,
+      this._config,
+    )
+    const filteredMarkets = filterMatchingConfigs(allowedMarkets, [
       params.chainId === undefined
         ? undefined
         : (market) => market.chainId === params.chainId,
@@ -233,11 +238,10 @@ export abstract class BorrowProvider<
         : (market) => market.borrowAsset === params.borrowAsset,
     ])
     // A caller-supplied `markets[]` override can narrow the configured
-    // allowlist, but cannot expand it or re-enable a blocklisted market.
-    const candidates = params.markets ?? filtered
+    // allowlist, but normal chain/asset filters still apply afterward.
     return this._getMarkets({
       ...params,
-      markets: selectAllowlistedBorrowMarketConfigs(candidates, this._config),
+      markets: filteredMarkets,
     })
   }
 

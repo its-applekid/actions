@@ -486,6 +486,23 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
     expect(markets[0].name).toBe(market.name)
   })
 
+  it('getMarkets still applies asset filters to caller-supplied allowlisted markets', async () => {
+    provider = makeProvider({ marketAllowlist: [market] })
+
+    await expect(
+      provider.getMarkets({
+        collateralAsset: borrowAsset,
+        markets: [market],
+      }),
+    ).resolves.toEqual([])
+    await expect(
+      provider.getMarkets({
+        borrowAsset: collateralAsset,
+        markets: [market],
+      }),
+    ).resolves.toEqual([])
+  })
+
   it('getMarkets drops a caller-supplied market that is blocklisted', async () => {
     provider = makeProvider({
       marketAllowlist: [market, otherMarket],
