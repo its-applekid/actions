@@ -343,6 +343,33 @@ describe('BorrowProvider - closePosition', () => {
       amountWei: 5_000_000_000_000_000_000n,
     })
   })
+
+  it('rejects a market on the blocklist before calling the concrete hook', async () => {
+    const provider = makeProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    await expect(
+      provider.closePosition({
+        market,
+        walletAddress,
+        borrowAmount: { max: true },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    expect(provider.closeCalls).toEqual([])
+  })
+
+  it('rejects when no allowlist is configured before calling the concrete hook', async () => {
+    const provider = makeProvider({})
+    await expect(
+      provider.closePosition({
+        market,
+        walletAddress,
+        borrowAmount: { max: true },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    expect(provider.closeCalls).toEqual([])
+  })
 })
 
 describe('BorrowProvider - single-amount actions', () => {
@@ -569,6 +596,23 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
         walletAddress: zeroAddress,
       }),
     ).rejects.toBeInstanceOf(ZeroAddressError)
+  })
+
+  it('getPosition rejects a blocklisted market even when allowlisted', async () => {
+    provider = makeProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    await expect(
+      provider.getPosition({ marketId: market, walletAddress }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+  })
+
+  it('getPosition rejects when no allowlist is configured', async () => {
+    provider = makeProvider({})
+    await expect(
+      provider.getPosition({ marketId: market, walletAddress }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
   })
 
   it('getPosition returns the concrete provider result', async () => {

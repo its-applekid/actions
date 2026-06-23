@@ -12,6 +12,9 @@ import { MarketNotAllowedError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { LendProviderConfig } from '@/types/actions.js'
+import type { LendMarket, LendMarketId } from '@/types/lend/index.js'
+
+type AccrualVault = Awaited<ReturnType<typeof fetchAccrualVault>>
 
 // Mock the Morpho SDK modules
 vi.mock('@morpho-org/blue-sdk-viem', () => ({
@@ -34,6 +37,42 @@ vi.mock('@morpho-org/bundler-sdk-viem', () => ({
   finalizeBundle: vi.fn(),
   encodeBundle: vi.fn(),
 }))
+
+class FailingSecondMarketReadMorphoLendProvider extends MorphoLendProvider {
+  private marketReads = 0
+
+  protected override async _getMarket(
+    marketId: LendMarketId,
+  ): Promise<LendMarket> {
+    this.marketReads += 1
+    if (this.marketReads === 1) return super._getMarket(marketId)
+    throw new Error('Market fetch failed')
+  }
+}
+
+class FailingMarketReadMorphoLendProvider extends MorphoLendProvider {
+  protected override async _getMarket(): Promise<LendMarket> {
+    throw new Error('Market fetch failed')
+  }
+}
+
+const mockRewardsResponse = () =>
+  new Response(
+    JSON.stringify({
+      data: {
+        vaultByAddress: {
+          state: {
+            rewards: [],
+            allocation: [],
+          },
+        },
+      },
+    }),
+    { status: 200 },
+  )
+
+const mockAccrualVault = (): AccrualVault =>
+  createMockMorphoVault() as unknown as AccrualVault
 
 describe('MorphoLendProvider', () => {
   let provider: MorphoLendProvider
@@ -58,26 +97,9 @@ describe('MorphoLendProvider', () => {
 
   describe('closePosition', () => {
     beforeEach(() => {
-      const mockVault = createMockMorphoVault()
+      vi.mocked(fetchAccrualVault).mockResolvedValue(mockAccrualVault())
 
-      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault as any)
-
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            data: {
-              vaultByAddress: {
-                state: {
-                  rewards: [],
-                  allocation: [],
-                },
-              },
-            },
-          }),
-        } as any),
-      )
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(mockRewardsResponse))
     })
 
     afterEach(() => {
@@ -115,10 +137,10 @@ describe('MorphoLendProvider', () => {
     })
 
     it('should handle withdrawal errors', async () => {
-      vi.spyOn(provider as any, '_getMarket').mockRejectedValueOnce(
-        new Error('Market fetch failed'),
+      const failingProvider = new FailingMarketReadMorphoLendProvider(
+        mockConfig,
+        mockChainManager,
       )
-
       const amount = 500
       const asset = MockGauntletUSDCMarket.asset
       const marketId = {
@@ -128,7 +150,7 @@ describe('MorphoLendProvider', () => {
       const walletAddress = MockReceiverAddress
 
       await expect(
-        provider.closePosition({
+        failingProvider.closePosition({
           amount,
           asset,
           marketId,
@@ -157,27 +179,9 @@ describe('MorphoLendProvider', () => {
 
   describe('openPosition', () => {
     beforeEach(() => {
-      const mockVault = createMockMorphoVault()
+      vi.mocked(fetchAccrualVault).mockResolvedValue(mockAccrualVault())
 
-      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault as any)
-
-      // Mock the fetch API for rewards
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            data: {
-              vaultByAddress: {
-                state: {
-                  rewards: [],
-                  allocation: [],
-                },
-              },
-            },
-          }),
-        } as any),
-      )
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(mockRewardsResponse))
     })
 
     afterEach(() => {
@@ -214,20 +218,19 @@ describe('MorphoLendProvider', () => {
     })
 
     it('should handle lending errors', async () => {
+      const failingProvider = new FailingSecondMarketReadMorphoLendProvider(
+        mockConfig,
+        mockChainManager,
+      )
       const asset = MockGauntletUSDCMarket.asset
       const amount = 1000
       const marketId = {
         address: MockGauntletUSDCMarket.address,
         chainId: MockGauntletUSDCMarket.chainId,
       }
-      const market = await provider.getMarket(marketId)
-
-      vi.spyOn(provider as any, '_getMarket')
-        .mockResolvedValueOnce(market)
-        .mockRejectedValueOnce(new Error('Market fetch failed'))
 
       await expect(
-        provider.openPosition({
+        failingProvider.openPosition({
           amount,
           asset,
           marketId,

@@ -333,10 +333,11 @@ export interface GetPositionParams {
 
 /**
  * Parameters for getting lending markets
- * @description Parameters for filtering lending markets
+ * @description Results are constrained to configured provider allowlists.
+ * Caller-supplied `markets` can only narrow those allowlists.
  */
 export interface GetLendMarketsParams extends FilterAssetChain {
-  /** Optional pre-filtered market configs */
+  /** Market configs used to narrow configured allowlists */
   markets?: LendMarketConfig[]
 }
 

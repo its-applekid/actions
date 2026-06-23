@@ -75,11 +75,13 @@ export abstract class LendProvider<
 
   /**
    * Open a lending position
-   * @param amount - Amount to lend (human-readable number)
-   * @param asset - Asset to lend
-   * @param marketId - Market identifier containing address and chainId
-   * @param options - Optional lending configuration
+   * @description Validates wallet, chain, market allowlist/blocklist, and the
+   * caller asset against the resolved market underlying before amount parsing,
+   * provider routing, or approval construction.
+   * @param params - Market, asset, wallet, amount, and optional approval mode
    * @returns Promise resolving to lending transaction details
+   * @throws MarketNotAllowedError when the market is not allowlisted, is
+   * blocklisted, or the caller asset does not match the market underlying
    */
   async openPosition(params: LendOpenPositionParams): Promise<LendTransaction> {
     validateWalletAddress(params.walletAddress)
@@ -145,8 +147,12 @@ export abstract class LendProvider<
 
   /**
    * Get list of available lending markets
-   * @param params - Optional filtering parameters
+   * @description Lists configured allowlisted markets after dropping
+   * blocklisted entries. Caller-supplied `markets` can only narrow the
+   * configured allowlist; omitted or empty allowlists return no markets.
+   * @param params - Optional chain, asset, and market-narrowing filters
    * @returns Promise resolving to array of market information
+   * @throws ChainNotSupportedError when a requested chain is unsupported
    */
   async getMarkets(params: GetLendMarketsParams = {}): Promise<LendMarket[]> {
     if (params.chainId !== undefined) this.assertChainSupported(params.chainId)
@@ -200,12 +206,13 @@ export abstract class LendProvider<
 
   /**
    * Close a lending position (withdraw assets from a market)
-   * @param amount - Amount to withdraw (human-readable number)
-   * @param asset - Asset to withdraw (optional, validated against marketId)
-   * @param marketId - Market identifier containing address and chainId
-   * @param walletAddress - Wallet address for receiving assets and as owner
-   * @param options - Optional withdrawal configuration
+   * @description Validates wallet, chain, market allowlist/blocklist, and any
+   * caller asset against the resolved market underlying before using the trusted
+   * market asset for amount parsing and provider routing.
+   * @param params - Market, optional asset, wallet, amount, and withdrawal options
    * @returns Promise resolving to withdrawal transaction details
+   * @throws MarketNotAllowedError when the market is not allowlisted, is
+   * blocklisted, or the caller asset does not match the market underlying
    */
   async closePosition(params: ClosePositionParams): Promise<LendTransaction> {
     validateWalletAddress(params.walletAddress)

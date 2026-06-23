@@ -70,7 +70,8 @@ export abstract class BorrowProvider<
   /**
    * The `BorrowMarketId` discriminator this provider services. Lets the
    * namespace route a market to its provider by kind without naming concrete
-   * providers, and is the fallback when a provider carries no market allowlist.
+   * providers. Provider read/write methods still fail closed when the resolved
+   * provider has an empty or omitted market allowlist.
    */
   public abstract get marketKind(): BorrowMarketId['kind']
 
@@ -211,6 +212,8 @@ export abstract class BorrowProvider<
    * List configured borrow markets.
    * @description Applies optional client-side filters against the provider
    * allowlist before delegating protocol reads to the concrete provider.
+   * Caller-supplied `markets` can only narrow the configured allowlist; omitted
+   * or empty allowlists return no markets.
    * @param params - Optional chain and asset filters.
    * @returns Borrow markets matching the supplied filters.
    * @throws ChainNotSupportedError when a requested chain is unsupported.
