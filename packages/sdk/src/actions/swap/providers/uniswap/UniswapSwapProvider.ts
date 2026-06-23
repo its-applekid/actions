@@ -75,6 +75,7 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
     })
     return this.buildSwapTransactions({
       ...swapQuote,
+      recipient: params.walletAddress,
       approvalMode: params.approvalMode,
     })
   }

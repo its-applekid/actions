@@ -3,6 +3,7 @@ import { baseSepolia } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
 import { MockWETHAsset } from '@/__mocks__/MockAssets.js'
+import { decodeUniversalRouterRecipient } from '@/actions/swap/providers/uniswap/encoding.js'
 import type { UniswapSwapProviderConfig } from '@/actions/swap/providers/uniswap/types.js'
 import { UniswapSwapProvider } from '@/actions/swap/providers/uniswap/UniswapSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
@@ -56,6 +57,7 @@ function createMockChainManager(): ChainManager {
 
 function createProvider(
   configOverrides?: Partial<UniswapSwapProviderConfig>,
+  chainManager: ChainManager = createMockChainManager(),
 ): UniswapSwapProvider {
   const config: UniswapSwapProviderConfig = {
     defaultSlippage: 0.005,
@@ -64,7 +66,7 @@ function createProvider(
     ],
     ...configOverrides,
   }
-  return new UniswapSwapProvider(config, createMockChainManager())
+  return new UniswapSwapProvider(config, chainManager)
 }
 
 describe('UniswapSwapProvider', () => {
@@ -107,6 +109,37 @@ describe('UniswapSwapProvider', () => {
       // Mock readContract returns 0n (no allowance), so approvals should be needed
       expect(result.transactionData.tokenApproval).toBeDefined()
       expect(result.transactionData.permit2Approval).toBeDefined()
+    })
+
+    it('routes output to requested recipient while checking wallet allowance', async () => {
+      const chainManager = createMockChainManager()
+      const provider = createProvider(undefined, chainManager)
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const recipient = '0x5555555555555555555555555555555555555555' as Address
+
+      const result = await provider.execute({
+        amountIn: 100,
+        assetIn: USDC,
+        assetOut: OP,
+        chainId: CHAIN_ID,
+        walletAddress,
+        recipient,
+      })
+
+      expect(
+        decodeUniversalRouterRecipient(result.transactionData.swap.data),
+      ).toBe(recipient)
+
+      const publicClient = chainManager.getPublicClient(
+        CHAIN_ID,
+      ) as unknown as PublicClient
+      expect(publicClient.readContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'allowance',
+          args: [walletAddress, USDC.address[CHAIN_ID], expect.any(String)],
+        }),
+      )
     })
 
     it('throws without fee/tickSpacing in market filter', async () => {

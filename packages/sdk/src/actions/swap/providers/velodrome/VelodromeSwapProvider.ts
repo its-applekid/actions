@@ -92,6 +92,7 @@ export class VelodromeSwapProvider extends SwapProvider<VelodromeSwapProviderCon
     })
     return this.buildSwapTransactions({
       ...swapQuote,
+      recipient: params.walletAddress,
       approvalMode: params.approvalMode,
     })
   }

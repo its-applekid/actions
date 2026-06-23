@@ -239,6 +239,25 @@ export class ZeroAddressError extends ActionsError {
   }
 }
 
+/**
+ * Thrown at the encoder seam when a swap `recipient` is not a valid,
+ * correctly-checksummed EVM address. Catches malformed, truncated, or
+ * mis-checksummed (typo'd / address-poisoned) recipients before they are
+ * baked verbatim into signed calldata, defense-in-depth even after upstream
+ * recipient validation.
+ */
+export class InvalidRecipientError extends ActionsError {
+  override name = 'InvalidRecipientError' as const
+  recipient: string
+
+  constructor(recipient: string) {
+    super('recipient is not a valid, checksummed address', {
+      metaMessages: [`Received: ${recipient}`],
+    })
+    this.recipient = recipient
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Slippage
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,6 +299,32 @@ export class NativeAssetAddressError extends ActionsError {
   constructor(symbol: string) {
     super(`${symbol} is a native asset and has no contract address`)
     this.symbol = symbol
+  }
+}
+
+/**
+ * Thrown when native-ETH input is requested on a router path that cannot
+ * settle or wrap it. The Velodrome universal/CL encoders pull the input token
+ * via `transferFrom` (`payerIsUser = true`) and emit no `WRAP_ETH`, so a
+ * native-in swap would attach `msg.value` to a call expecting an ERC-20 pull
+ * and revert. Fail closed at the encoder seam instead (F047).
+ */
+export class NativeAssetNotSupportedError extends ActionsError {
+  override name = 'NativeAssetNotSupportedError' as const
+  symbol: string
+  context: string
+
+  constructor(params: { symbol: string; context: string }) {
+    super(
+      `Native ${params.symbol} input is not supported on ${params.context}`,
+      {
+        metaMessages: [
+          'Use a wrapped-native (WETH) input, or route through a path that wraps ETH.',
+        ],
+      },
+    )
+    this.symbol = params.symbol
+    this.context = params.context
   }
 }
 
@@ -345,6 +390,27 @@ export class QuoteRecipientMismatchError extends ActionsError {
       `Quote was generated for a different recipient (${params.quoteRecipient}); re-quote so calldata is bound to this wallet (${params.walletAddress})`,
     )
     this.quoteRecipient = params.quoteRecipient
+    this.walletAddress = params.walletAddress
+  }
+}
+
+/**
+ * Thrown when a pre-built quote's metadata `recipient` equals the executing
+ * wallet, but the recipient actually encoded in `execution.swapCalldata`
+ * routes output somewhere else. Re-deriving the recipient from the signed
+ * bytes (rather than trusting metadata) catches a tampered quote that would
+ * otherwise pass the metadata-only `recipient === wallet` check.
+ */
+export class QuoteCalldataRecipientMismatchError extends ActionsError {
+  override name = 'QuoteCalldataRecipientMismatchError' as const
+  calldataRecipient: string
+  walletAddress: string
+
+  constructor(params: { calldataRecipient: string; walletAddress: string }) {
+    super(
+      `Quote calldata routes output to ${params.calldataRecipient}, not the executing wallet (${params.walletAddress}); re-quote so calldata is bound to this wallet`,
+    )
+    this.calldataRecipient = params.calldataRecipient
     this.walletAddress = params.walletAddress
   }
 }

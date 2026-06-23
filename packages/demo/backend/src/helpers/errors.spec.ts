@@ -9,12 +9,15 @@ import {
   EmptyPositionError,
   InvalidAmountError,
   InvalidParamsError,
+  InvalidRecipientError,
   MarketIdRequiredError,
   MarketNotAllowedError,
   MarketNotFoundError,
   NativeAssetAddressError,
+  NativeAssetNotSupportedError,
   ProtocolContractsNotConfiguredError,
   ProviderNotConfiguredError,
+  QuoteCalldataRecipientMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
@@ -169,6 +172,13 @@ describe('mapSdkError', () => {
     })
   })
 
+  it('maps InvalidRecipientError to 400', () => {
+    expect(mapSdkError(new InvalidRecipientError('0xnot-an-address'))).toEqual({
+      status: 400,
+      message: 'Invalid recipient address.',
+    })
+  })
+
   it('maps QuoteRecipientMissingError to 400', () => {
     expect(mapSdkError(new QuoteRecipientMissingError())).toEqual({
       status: 400,
@@ -192,6 +202,20 @@ describe('mapSdkError', () => {
     })
   })
 
+  it('maps NativeAssetNotSupportedError to 400', () => {
+    expect(
+      mapSdkError(
+        new NativeAssetNotSupportedError({
+          symbol: 'ETH',
+          context: 'Velodrome CL router',
+        }),
+      ),
+    ).toEqual({
+      status: 400,
+      message: 'Native asset input is not supported for this swap route.',
+    })
+  })
+
   it('maps AssetMetadataRequiredError to 400', () => {
     expect(mapSdkError(new AssetMetadataRequiredError())).toEqual({
       status: 400,
@@ -206,6 +230,20 @@ describe('mapSdkError', () => {
         message: 'No position to operate on.',
       },
     )
+  })
+
+  it('maps QuoteCalldataRecipientMismatchError to 403', () => {
+    expect(
+      mapSdkError(
+        new QuoteCalldataRecipientMismatchError({
+          calldataRecipient: '0x0000000000000000000000000000000000000001',
+          walletAddress: '0x0000000000000000000000000000000000000002',
+        }),
+      ),
+    ).toEqual({
+      status: 403,
+      message: 'Quote calldata recipient does not match the executing wallet.',
+    })
   })
 
   it('maps ProtocolContractsNotConfiguredError to 503', () => {

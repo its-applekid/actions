@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/uniswap/abis.js'
 import {
   calculatePriceImpact,
+  decodeUniversalRouterRecipient,
   encodeUniversalRouterSwap,
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
@@ -39,6 +40,10 @@ const POOL_MANAGER = '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408' as Address
 const CHAIN_ID = 84532 as SupportedChainId
 const FEE = 100
 const TICK_SPACING = 2
+
+// Distinct, correctly-checksummed addresses for recipient-routing assertions.
+const RECIPIENT = '0x000000000000000000000000000000000000dEaD' as Address
+const OTHER_RECIPIENT = '0x1234567890123456789012345678901234567890' as Address
 
 // Mock sqrtPriceX96 for a ~2000 USDC/WETH pool
 // sqrtPriceX96 = sqrt(price) * 2^96, where price = WETH/USDC adjusted for decimals
@@ -235,7 +240,7 @@ describe('calculatePriceImpact', () => {
     const impact = calculatePriceImpact({
       sqrtPriceX96: MID_SQRT_PRICE,
       amountIn: 100000000n,
-      amountOut: 600000000000000000n, // 0.6 WETH — better than ~0.5 mid
+      amountOut: 600000000000000000n, // 0.6 WETH, better than ~0.5 mid
       zeroForOne: true,
     })
 
@@ -278,7 +283,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -297,7 +302,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -316,6 +321,9 @@ describe('encodeUniversalRouterSwap', () => {
     // bare-reverted on pool lookup. Correct codes:
     //   0x06 SWAP_EXACT_IN_SINGLE
     //   0x08 SWAP_EXACT_OUT_SINGLE
+    //   0x0c SETTLE_ALL
+    //   0x0e TAKE: routes output to an explicit recipient (was 0x0f TAKE_ALL,
+    //        which credits msg.sender and ignored the advertised recipient).
     const decodeActions = (calldata: `0x${string}`): `0x${string}` => {
       const { args } = decodeFunctionData({
         abi: UNIVERSAL_ROUTER_ABI,
@@ -339,14 +347,14 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
       fee: FEE,
       tickSpacing: TICK_SPACING,
     })
-    expect(decodeActions(exactIn)).toBe('0x060c0f')
+    expect(decodeActions(exactIn)).toBe('0x060c0e')
 
     const exactOut = encodeUniversalRouterSwap({
       amountOutRaw: 500000000000000000n,
@@ -354,14 +362,14 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
       fee: FEE,
       tickSpacing: TICK_SPACING,
     })
-    expect(decodeActions(exactOut)).toBe('0x080c0f')
+    expect(decodeActions(exactOut)).toBe('0x080c0e')
   })
 
   it('produces different calldata for exact-in vs exact-out', () => {
@@ -371,7 +379,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -385,7 +393,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -403,7 +411,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -417,7 +425,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.05, // 5%
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -427,5 +435,53 @@ describe('encodeUniversalRouterSwap', () => {
 
     // Different slippage should produce different calldata
     expect(noSlippage).not.toBe(withSlippage)
+  })
+})
+
+describe('V4 recipient honoring (F046)', () => {
+  const baseQuote = {
+    price: '0.005',
+    priceInverse: '200',
+    amountIn: 100,
+    amountOut: 0.5,
+    amountInRaw: 100000000n,
+    amountOutRaw: 500000000000000000n,
+    priceImpact: 0.001,
+    route: { path: [USDC, WETH], pools: [] },
+    gasEstimate: 150000n,
+  }
+
+  const encode = (recipient: Address, exactOut = false) =>
+    encodeUniversalRouterSwap({
+      amountInRaw: exactOut ? undefined : 100000000n,
+      amountOutRaw: exactOut ? 500000000000000000n : undefined,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: 0.005,
+      deadline: 1700000000,
+      recipient,
+      chainId: CHAIN_ID,
+      quote: baseQuote,
+      universalRouterAddress:
+        '0x0000000000000000000000000000000000000099' as Address,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+  it('encodes the requested recipient in the V4 TAKE action (exact-in)', () => {
+    const calldata = encode(RECIPIENT)
+    expect(decodeUniversalRouterRecipient(calldata)).toBe(RECIPIENT)
+  })
+
+  it('encodes the requested recipient in the V4 TAKE action (exact-out)', () => {
+    const calldata = encode(RECIPIENT, true)
+    expect(decodeUniversalRouterRecipient(calldata)).toBe(RECIPIENT)
+  })
+
+  it('routes to a non-self recipient rather than dropping to msg.sender', () => {
+    const calldata = encode(OTHER_RECIPIENT)
+    // Decoding the bytes (not asserting against itself) recovers the exact
+    // recipient, proving output is no longer silently sent to msg.sender.
+    expect(decodeUniversalRouterRecipient(calldata)).toBe(OTHER_RECIPIENT)
   })
 })

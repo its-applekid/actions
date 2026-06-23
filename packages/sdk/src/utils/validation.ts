@@ -1,5 +1,5 @@
 import type { Address } from 'viem'
-import { isAddress } from 'viem'
+import { getAddress, isAddress } from 'viem'
 
 import {
   SUPPORTED_CHAIN_IDS,
@@ -13,6 +13,7 @@ import {
   ConflictingAmountsError,
   InvalidAmountError,
   InvalidParamsError,
+  InvalidRecipientError,
   QuoteExpiredError,
   SameAssetError,
   SlippageOutOfRangeError,
@@ -177,4 +178,21 @@ export function validateRecipient(recipient: string | undefined): void {
   if (recipient && isAddress(recipient)) {
     validateNotZeroAddress(recipient, 'recipient')
   }
+}
+
+/**
+ * Assert a swap recipient is a valid, correctly-checksummed EVM address before
+ * it is encoded into signed calldata. Accepts all-lowercase and no-letter
+ * addresses (viem treats these as un-checksummed but valid) while rejecting
+ * malformed, truncated, and mis-checksummed (typo'd / address-poisoned)
+ * values via `isAddress(..., { strict: true })`. This is the encoder-seam
+ * defense-in-depth referenced by F079; it does not replace the upstream
+ * `validateRecipient`/ENS resolution.
+ * @throws InvalidRecipientError when the recipient fails strict validation.
+ */
+export function assertChecksummedRecipient(recipient: string): Address {
+  if (!isAddress(recipient, { strict: true })) {
+    throw new InvalidRecipientError(recipient)
+  }
+  return getAddress(recipient)
 }

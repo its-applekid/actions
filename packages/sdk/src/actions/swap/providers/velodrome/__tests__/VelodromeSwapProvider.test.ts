@@ -9,6 +9,7 @@ import {
   MockUSDCAsset as USDC,
   MockWETHAsset as WETH,
 } from '@/__mocks__/MockAssets.js'
+import { decodeSwapRecipient } from '@/actions/swap/providers/velodrome/encoding/index.js'
 import type { VelodromeSwapProviderConfig } from '@/actions/swap/providers/velodrome/types.js'
 import { VelodromeSwapProvider } from '@/actions/swap/providers/velodrome/VelodromeSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
@@ -44,13 +45,14 @@ function createMockChainManager(
 
 function createProvider(
   configOverrides?: Partial<VelodromeSwapProviderConfig>,
+  chainManager: ChainManager = createMockChainManager(),
 ): VelodromeSwapProvider {
   const config: VelodromeSwapProviderConfig = {
     defaultSlippage: 0.005,
     marketAllowlist: [{ assets: [USDC, OP], stable: false, chainId: CHAIN_ID }],
     ...configOverrides,
   }
-  return new VelodromeSwapProvider(config, createMockChainManager())
+  return new VelodromeSwapProvider(config, chainManager)
 }
 
 describe('VelodromeSwapProvider', () => {
@@ -134,6 +136,35 @@ describe('VelodromeSwapProvider', () => {
       })
       expect(decoded.functionName).toBe('approve')
       expect(decoded.args[1]).toBe(maxUint256)
+    })
+
+    it('routes output to requested recipient while checking wallet allowance', async () => {
+      const chainManager = createMockChainManager()
+      const provider = createProvider(undefined, chainManager)
+      const recipient = '0x5555555555555555555555555555555555555555' as Address
+
+      const result = await provider.execute({
+        amountIn: 100,
+        assetIn: USDC,
+        assetOut: OP,
+        chainId: CHAIN_ID,
+        walletAddress: MOCK_WALLET,
+        recipient,
+      })
+
+      expect(decodeSwapRecipient(result.transactionData.swap.data, 'v2')).toBe(
+        recipient,
+      )
+
+      const publicClient = chainManager.getPublicClient(
+        CHAIN_ID,
+      ) as unknown as PublicClient
+      expect(publicClient.readContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'allowance',
+          args: [MOCK_WALLET, expect.any(String)],
+        }),
+      )
     })
 
     it('throws for exact-output swaps', async () => {

@@ -1,5 +1,11 @@
 import type { Address, Hex, PublicClient } from 'viem'
-import { encodeAbiParameters, encodeFunctionData, encodePacked } from 'viem'
+import {
+  decodeAbiParameters,
+  decodeFunctionData,
+  encodeAbiParameters,
+  encodeFunctionData,
+  encodePacked,
+} from 'viem'
 
 import {
   LEAF_ROUTER_ABI,
@@ -12,13 +18,17 @@ import type { VelodromeRouterType } from '@/actions/swap/providers/velodrome/con
 import {
   buildSwapPrice,
   resolveTokens,
-  UNIVERSAL_ROUTER_MSG_SENDER,
 } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { MarketNotAllowedError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  MarketNotAllowedError,
+  NativeAssetNotSupportedError,
+} from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type { SwapPrice, SwapRoute } from '@/types/swap/index.js'
 import { isNativeAsset } from '@/utils/assets.js'
+import { assertChecksummedRecipient } from '@/utils/validation.js'
 
 /** Universal Router V2_SWAP_EXACT_IN command byte */
 const V2_SWAP_EXACT_IN = 0x08
@@ -101,7 +111,7 @@ async function fetchAmountOut(
   throw new Error(`Unknown router type: ${routerType as string}`)
 }
 
-/** Quote via Pool.getAmountOut (Universal Router path — no router-level quoting available). */
+/** Quote via Pool.getAmountOut (Universal Router path, no router-level quoting available). */
 async function fetchAmountOutViaPool(
   params: GetQuoteParams,
   tokenIn: Address,
@@ -205,7 +215,7 @@ export function encodeSwap(params: EncodeSwapParams): Hex {
 
 /**
  * Encode a V2_SWAP_EXACT_IN command for the Universal Router.
- * Route: encodePacked(tokenIn, stable, tokenOut) — 41 bytes per hop.
+ * Route: encodePacked(tokenIn, stable, tokenOut), 41 bytes per hop.
  *
  * payerIsUser = true: the router pulls tokens from msg.sender via standard
  * transferFrom against an existing ERC20 allowance. Works for both EOAs (sequential
@@ -216,18 +226,21 @@ function encodeUniversalV2Swap(
   tokenOut: Address,
   params: EncodeSwapParams,
 ): Hex {
+  assertNoNativeInput(params.assetIn, 'Velodrome universal router')
+
   const commands = encodePacked(['uint8'], [V2_SWAP_EXACT_IN])
   const routes = encodePacked(
     ['address', 'bool', 'address'],
     [tokenIn, params.stable, tokenOut],
   )
+  const recipient = assertChecksummedRecipient(params.recipient)
   const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
-    UNIVERSAL_ROUTER_MSG_SENDER, // recipient = msg.sender (Universal Router sentinel)
+    recipient,
     params.amountInRaw,
     params.amountOutMin,
     routes,
-    true, // payerIsUser — router pulls from msg.sender via transferFrom
-    false, // isUni — false for Velodrome/Aerodrome
+    true, // payerIsUser: router pulls from msg.sender via transferFrom
+    false, // isUni: false for Velodrome/Aerodrome
   ])
   return encodeFunctionData({
     abi: UNIVERSAL_ROUTER_ABI,
@@ -247,8 +260,8 @@ function encodeRouterSwap(
   abi: typeof V2_ROUTER_ABI | typeof LEAF_ROUTER_ABI,
   route: { from: Address; to: Address; stable: boolean; factory?: Address },
 ): Hex {
-  const { assetIn, assetOut, amountInRaw, amountOutMin, recipient, deadline } =
-    params
+  const { assetIn, assetOut, amountInRaw, amountOutMin, deadline } = params
+  const recipient = assertChecksummedRecipient(params.recipient)
 
   if (isNativeAsset(assetIn)) {
     return encodeFunctionData({
@@ -271,4 +284,88 @@ function encodeRouterSwap(
     functionName: 'swapExactTokensForTokens',
     args: [amountInRaw, amountOutMin, [route], recipient, BigInt(deadline)],
   })
+}
+
+/**
+ * Decode the recipient from Velodrome v2, leaf, or universal-router calldata.
+ * @param swapCalldata - Encoded swap calldata
+ * @param routerType - Router variant used for the quote
+ * @returns Recipient address baked into the calldata
+ * @throws InvalidParamsError when the router type is unknown
+ */
+export function decodeSwapRecipient(
+  swapCalldata: Hex,
+  routerType: VelodromeRouterType,
+): Address {
+  if (routerType === 'universal') {
+    return decodeUniversalV2SwapRecipient(swapCalldata)
+  }
+  if (routerType === 'v2' || routerType === 'leaf') {
+    return decodeRouterSwapRecipient(swapCalldata, routerType)
+  }
+  throw new InvalidParamsError({
+    param: 'routerType',
+    expected: 'universal, v2, or leaf',
+    received: String(routerType),
+  })
+}
+
+/**
+ * Decode the recipient from a Velodrome universal-router V2 swap.
+ * @param swapCalldata - Encoded Universal Router execute calldata
+ * @returns Recipient address from the V2_SWAP_EXACT_IN input payload
+ */
+export function decodeUniversalV2SwapRecipient(swapCalldata: Hex): Address {
+  const { args } = decodeFunctionData({
+    abi: UNIVERSAL_ROUTER_ABI,
+    data: swapCalldata,
+  })
+  const inputs = args[1]
+  const [recipient] = decodeAbiParameters(
+    V2_SWAP_EXACT_IN_INPUT_PARAMS,
+    inputs[0],
+  )
+  return recipient
+}
+
+/**
+ * Decode the recipient from Velodrome v2 or leaf router calldata.
+ * @param swapCalldata - Encoded v2 or leaf router calldata
+ * @param routerType - Legacy router variant used for the quote
+ * @returns Recipient address from the router swap call
+ */
+export function decodeRouterSwapRecipient(
+  swapCalldata: Hex,
+  routerType: Extract<VelodromeRouterType, 'v2' | 'leaf'>,
+): Address {
+  const abi = routerType === 'leaf' ? LEAF_ROUTER_ABI : V2_ROUTER_ABI
+  const { functionName, args } = decodeFunctionData({ abi, data: swapCalldata })
+
+  if (functionName === 'swapExactETHForTokens') {
+    const [, , recipient] = args
+    return recipient
+  }
+
+  if (
+    functionName === 'swapExactTokensForETH' ||
+    functionName === 'swapExactTokensForTokens'
+  ) {
+    const [, , , recipient] = args
+    return recipient
+  }
+
+  throw new InvalidParamsError({
+    param: 'swapCalldata',
+    expected: 'Velodrome v2 or leaf swap calldata',
+    received: functionName,
+  })
+}
+
+function assertNoNativeInput(assetIn: Asset, context: string): void {
+  if (isNativeAsset(assetIn)) {
+    throw new NativeAssetNotSupportedError({
+      symbol: assetIn.metadata.symbol,
+      context,
+    })
+  }
 }

@@ -1,14 +1,24 @@
 import type { Address, Hex, PublicClient } from 'viem'
 
-import type { VelodromeChainConfig } from '@/actions/swap/providers/velodrome/config.js'
+import type {
+  VelodromeChainConfig,
+  VelodromeRouterType,
+} from '@/actions/swap/providers/velodrome/config.js'
 import type { ResolvedPoolConfig } from '@/actions/swap/providers/velodrome/types.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { ChainNotSupportedError } from '@/core/error/errors.js'
+import {
+  ChainNotSupportedError,
+  InvalidParamsError,
+} from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type { SwapPrice } from '@/types/swap/index.js'
 
-import { encodeCLSwap, getCLQuote } from './routers/cl.js'
-import { encodeSwap, getQuote } from './routers/v2.js'
+import {
+  decodeCLSwapRecipient,
+  encodeCLSwap,
+  getCLQuote,
+} from './routers/cl.js'
+import { decodeSwapRecipient, encodeSwap, getQuote } from './routers/v2.js'
 
 /** Internal result from pool-type-specific quoting */
 export interface PoolQuoteResult {
@@ -122,4 +132,40 @@ export function encodePoolSwap(
     deadline: params.deadline,
     chainId: params.chainId,
   })
+}
+
+/**
+ * Decode the recipient from Velodrome calldata using quote provider context.
+ * @param swapCalldata - Encoded swap calldata
+ * @param providerContext - Provider context emitted by `fetchPoolQuote`
+ * @returns Recipient address baked into the calldata
+ * @throws InvalidParamsError when the context is missing or unsupported
+ */
+export function decodePoolSwapRecipient(
+  swapCalldata: Hex,
+  providerContext: Record<string, unknown> | undefined,
+): Address {
+  if (isCLProviderContext(providerContext)) {
+    return decodeCLSwapRecipient(swapCalldata)
+  }
+
+  const routerType = providerContext?.routerType
+  if (isVelodromeRouterType(routerType)) {
+    return decodeSwapRecipient(swapCalldata, routerType)
+  }
+
+  throw new InvalidParamsError({
+    param: 'providerContext',
+    expected: 'Velodrome quote context with tickSpacing or routerType',
+  })
+}
+
+function isCLProviderContext(
+  providerContext: Record<string, unknown> | undefined,
+): providerContext is Record<string, unknown> & { tickSpacing: number } {
+  return typeof providerContext?.tickSpacing === 'number'
+}
+
+function isVelodromeRouterType(value: unknown): value is VelodromeRouterType {
+  return value === 'universal' || value === 'v2' || value === 'leaf'
 }

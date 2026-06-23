@@ -232,7 +232,7 @@ describe('SwapProvider', () => {
     it('passes quote.recipient through to _buildApprovals', async () => {
       const provider = new MockSwapProvider()
       const customRecipient =
-        '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' as Address
+        '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address
       const quote = await provider.getQuote({
         assetIn: MockUSDC,
         assetOut: MockWETH,

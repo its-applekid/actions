@@ -1,7 +1,19 @@
-import type { Address } from 'viem'
+import {
+  type Address,
+  encodeAbiParameters,
+  encodeFunctionData,
+  encodePacked,
+  type Hex,
+} from 'viem'
 import { type MockedFunction, vi } from 'vitest'
 
 import { SwapProvider } from '@/actions/swap/core/SwapProvider.js'
+import {
+  TAKE_PARAMS,
+  UNIVERSAL_ROUTER_ABI as UNISWAP_UNIVERSAL_ROUTER_ABI,
+} from '@/actions/swap/providers/uniswap/abis.js'
+import { UNIVERSAL_ROUTER_ABI as VELODROME_UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/velodrome/abis.js'
+import { V2_SWAP_EXACT_IN_INPUT_PARAMS } from '@/actions/swap/providers/velodrome/encoding/routers/v2.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
@@ -177,6 +189,8 @@ export class MockSwapProvider extends SwapProvider<SwapProviderConfig> {
     )
     const amountOutMinRaw =
       (amountOutRaw * BigInt(Math.round((1 - slippage) * 10000))) / 10000n
+    const recipient = (params.recipient ??
+      '0x0000000000000000000000000000000000000001') as Address
 
     return {
       assetIn: params.assetIn,
@@ -195,20 +209,68 @@ export class MockSwapProvider extends SwapProvider<SwapProviderConfig> {
         path: [params.assetIn, params.assetOut],
         pools: [{ address: '0x1234' as Address, fee: 500, version: 'v4' }],
       },
-      execution: {
-        swapCalldata: '0x1234' as `0x${string}`,
-        routerAddress: '0x492e6456d9528771018deb9e87ef7750ef184104' as Address,
-        value: 0n,
-      },
+      execution: this.createMockExecution(recipient, deadline),
       provider: this.mockProviderConfig.provider,
       slippage,
       deadline,
       quotedAt: now,
       expiresAt: deadline,
       gasEstimate: 150000n,
-      recipient: (params.recipient ??
-        '0x0000000000000000000000000000000000000001') as Address,
+      recipient,
     }
+  }
+
+  private createMockExecution(recipient: Address, deadline: number) {
+    if (this.mockProviderConfig.provider === 'velodrome') {
+      return {
+        swapCalldata: this.createMockVelodromeCalldata(recipient, deadline),
+        routerAddress: '0x492e6456d9528771018deb9e87ef7750ef184104' as Address,
+        value: 0n,
+        providerContext: { routerType: 'universal' },
+      }
+    }
+
+    return {
+      swapCalldata: this.createMockUniswapCalldata(recipient, deadline),
+      routerAddress: '0x492e6456d9528771018deb9e87ef7750ef184104' as Address,
+      value: 0n,
+    }
+  }
+
+  private createMockUniswapCalldata(recipient: Address, deadline: number): Hex {
+    const takeParams = encodeAbiParameters(TAKE_PARAMS, [
+      '0x0000000000000000000000000000000000000000',
+      recipient,
+      0n,
+    ])
+    const input = encodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      ['0x0e', [takeParams]],
+    )
+    return encodeFunctionData({
+      abi: UNISWAP_UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: ['0x10', [input], BigInt(deadline)],
+    })
+  }
+
+  private createMockVelodromeCalldata(
+    recipient: Address,
+    deadline: number,
+  ): Hex {
+    const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
+      recipient,
+      1n,
+      1n,
+      '0x',
+      true,
+      false,
+    ])
+    return encodeFunctionData({
+      abi: VELODROME_UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: [encodePacked(['uint8'], [0x08]), [input], BigInt(deadline)],
+    })
   }
 
   private createMockMarket(params: GetSwapMarketParams): SwapMarket {

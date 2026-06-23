@@ -1,5 +1,7 @@
 import type { Address, Hex, PublicClient } from 'viem'
 import {
+  decodeAbiParameters,
+  decodeFunctionData,
   encodeAbiParameters,
   encodeFunctionData,
   formatUnits,
@@ -14,12 +16,15 @@ import {
   EXTSLOAD_ABI,
   POOL_KEY_ABI_TYPE,
   QUOTER_ABI,
+  TAKE_PARAMS,
   UNIVERSAL_ROUTER_ABI,
 } from '@/actions/swap/providers/uniswap/abis.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { InvalidParamsError } from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type { SwapPrice, SwapRoute } from '@/types/swap/index.js'
 import { getAssetAddress, isNativeAsset } from '@/utils/assets.js'
+import { assertChecksummedRecipient } from '@/utils/validation.js'
 
 /**
  * V4 represents native ETH as address(0) in pool keys and settle/take params,
@@ -122,7 +127,7 @@ export async function getQuote(params: GetQuoteParams): Promise<SwapPrice> {
 
   const isExactInput = amountInRaw !== undefined
 
-  // Read pool mid-price and quote in parallel — no extra sequential RPC call
+  // Read pool mid-price and quote in parallel, no extra sequential RPC call
   const [sqrtPriceX96, quoteResult] = await Promise.all([
     getPoolSqrtPrice({ publicClient, poolManagerAddress, poolKey }),
     isExactInput
@@ -215,7 +220,15 @@ const V4_SWAP = 0x10
 const SWAP_EXACT_IN_SINGLE = 0x06
 const SWAP_EXACT_OUT_SINGLE = 0x08
 const SETTLE_ALL = 0x0c
-const TAKE_ALL = 0x0f
+const TAKE = 0x0e
+
+/**
+ * V4 OPEN_DELTA sentinel for the TAKE action's `amount`: take the full positive
+ * output delta produced by the preceding swap. Slippage is enforced separately
+ * by the swap action's `amountOutMinimum`.
+ * @see https://github.com/Uniswap/v4-periphery/blob/main/src/libraries/ActionConstants.sol
+ */
+const OPEN_DELTA = 0n
 
 /**
  * Encode Universal Router V4 swap calldata
@@ -233,6 +246,12 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
     fee,
     tickSpacing,
   } = params
+
+  // Honor the advertised recipient: the swap output is routed to it via the
+  // V4 TAKE action below. Validate at the encoder seam so a malformed or
+  // mis-checksummed recipient is rejected before it is signed, rather than
+  // baked verbatim into calldata (defense-in-depth alongside upstream guards).
+  const recipient = assertChecksummedRecipient(params.recipient)
 
   const { tokenIn, tokenOut, zeroForOne, poolKey } = resolvePoolParams(
     assetIn,
@@ -252,7 +271,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       (quote.amountOutRaw * BigInt(Math.round((1 - slippage) * 10000))) / 10000n
 
     actions =
-      `0x${[SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
+      `0x${[SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
 
     actionParams = [
       encodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, [
@@ -265,7 +284,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
         },
       ]),
       encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenIn, amountInRaw]),
-      encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenOut, minAmountOut]),
+      encodeAbiParameters(TAKE_PARAMS, [tokenOut, recipient, OPEN_DELTA]),
     ]
   } else {
     const maxAmountIn =
@@ -273,7 +292,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       (quote.amountInRaw * BigInt(Math.round(slippage * 10000))) / 10000n
 
     actions =
-      `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
+      `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
 
     actionParams = [
       encodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, [
@@ -286,10 +305,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
         },
       ]),
       encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenIn, maxAmountIn]),
-      encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [
-        tokenOut,
-        quote.amountOutRaw,
-      ]),
+      encodeAbiParameters(TAKE_PARAMS, [tokenOut, recipient, OPEN_DELTA]),
     ]
   }
 
@@ -307,6 +323,46 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       [v4SwapInput],
       BigInt(deadline),
     ],
+  })
+}
+
+/**
+ * Recover the recipient encoded in a V4 Universal Router swap's calldata by
+ * decoding the TAKE action's params. Used by the wallet guard to verify the
+ * signed calldata actually routes output to the executing wallet, not to a
+ * destination implied only by trusted metadata.
+ * @param swapCalldata - Calldata produced by {@link encodeUniversalRouterSwap}
+ * @returns The recipient address baked into the TAKE action
+ * @throws InvalidParamsError when the calldata contains no TAKE action
+ */
+export function decodeUniversalRouterRecipient(swapCalldata: Hex): Address {
+  const { args } = decodeFunctionData({
+    abi: UNIVERSAL_ROUTER_ABI,
+    data: swapCalldata,
+  })
+  const inputs = args[1] as readonly Hex[]
+  const [actions, actionParams] = decodeAbiParameters(
+    [{ type: 'bytes' }, { type: 'bytes[]' }],
+    inputs[0],
+  )
+
+  // actions is a packed byte string (one byte per action); find the TAKE byte
+  // and decode the params slot at the same index.
+  const actionBytes = (actions as Hex).slice(2)
+  for (let i = 0; i < actionBytes.length / 2; i++) {
+    const byte = parseInt(actionBytes.slice(i * 2, i * 2 + 2), 16)
+    if (byte === TAKE) {
+      const [, recipient] = decodeAbiParameters(
+        TAKE_PARAMS,
+        (actionParams as readonly Hex[])[i],
+      )
+      return recipient
+    }
+  }
+
+  throw new InvalidParamsError({
+    param: 'swapCalldata',
+    expected: 'a V4 action list containing a TAKE action',
   })
 }
 
@@ -355,7 +411,7 @@ export async function getPoolSqrtPrice(params: {
     ]),
   )
 
-  // pools[poolId].slot0 — slot0 is at offset 0 from the mapping base
+  // pools[poolId].slot0: slot0 is at offset 0 from the mapping base
   const slot = keccak256(
     encodeAbiParameters(
       [{ type: 'bytes32' }, { type: 'uint256' }],

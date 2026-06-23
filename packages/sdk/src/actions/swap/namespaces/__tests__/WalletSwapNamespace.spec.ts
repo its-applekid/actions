@@ -1,9 +1,15 @@
 import type { Address } from 'viem'
+import { encodeAbiParameters, encodeFunctionData } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createMockSwapProvider } from '@/actions/swap/__mocks__/MockSwapProvider.js'
 import { WalletSwapNamespace } from '@/actions/swap/namespaces/WalletSwapNamespace.js'
+import {
+  TAKE_PARAMS,
+  UNIVERSAL_ROUTER_ABI,
+} from '@/actions/swap/providers/uniswap/abis.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { QuoteCalldataRecipientMismatchError } from '@/core/error/errors.js'
 import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 
 describe('WalletSwapNamespace', () => {
@@ -27,6 +33,23 @@ describe('WalletSwapNamespace', () => {
       send: vi.fn().mockResolvedValue({ transactionHash: '0xtx1' }),
       sendBatch: vi.fn().mockResolvedValue({ transactionHash: '0xtx2' }),
     } as unknown as Wallet
+  }
+
+  function encodeUniswapTakeRecipient(recipient: Address): `0x${string}` {
+    const takeParams = encodeAbiParameters(TAKE_PARAMS, [
+      '0x0000000000000000000000000000000000000000',
+      recipient,
+      0n,
+    ])
+    const input = encodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      ['0x0e', [takeParams]],
+    )
+    return encodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: ['0x10', [input], 1700000000n],
+    })
   }
 
   describe('execute', () => {
@@ -142,7 +165,7 @@ describe('WalletSwapNamespace', () => {
       const wallet = createMockWallet()
       const namespace = new WalletSwapNamespace({ uniswap: provider }, wallet)
       const customRecipient =
-        '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' as Address
+        '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address
 
       await namespace.execute({
         amountIn: 100,
@@ -219,7 +242,7 @@ describe('WalletSwapNamespace', () => {
       const wallet = createMockWallet()
       const namespace = new WalletSwapNamespace({ uniswap: provider }, wallet)
       const customRecipient =
-        '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' as Address
+        '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address
 
       const quote = await namespace.getQuote({
         assetIn: USDC,
@@ -239,7 +262,7 @@ describe('WalletSwapNamespace', () => {
       const wallet = createMockWallet()
       const namespace = new WalletSwapNamespace({ uniswap: provider }, wallet)
 
-      // Get quote without wallet (simulates ActionsSwapNamespace quote — recipient
+      // Get quote without wallet (simulates ActionsSwapNamespace quote: recipient
       // defaults to UNIVERSAL_ROUTER_MSG_SENDER, not the executing wallet)
       const quote = await provider.getQuote({
         assetIn: USDC,
@@ -295,7 +318,7 @@ describe('WalletSwapNamespace', () => {
 
       const result = await namespace.execute(quote)
       expect(result.price).toBeDefined()
-      // Single getQuote call — no re-quote, no re-encode.
+      // Single getQuote call: no re-quote, no re-encode.
       expect(provider.mockGetQuote).toHaveBeenCalledTimes(1)
     })
 
@@ -328,6 +351,33 @@ describe('WalletSwapNamespace', () => {
 
       const result = await namespace.execute(quote)
       expect(result.price).toBeDefined()
+    })
+
+    it('throws when quote metadata matches wallet but calldata routes elsewhere', async () => {
+      const provider = createMockSwapProvider()
+      const wallet = createMockWallet()
+      const namespace = new WalletSwapNamespace({ uniswap: provider }, wallet)
+      const attackerRecipient =
+        '0x2222222222222222222222222222222222222222' as Address
+
+      const quote = await namespace.getQuote({
+        assetIn: USDC,
+        assetOut: ETH,
+        amountIn: 100,
+        chainId: 84532 as SupportedChainId,
+      })
+      const tamperedQuote = {
+        ...quote,
+        execution: {
+          ...quote.execution,
+          swapCalldata: encodeUniswapTakeRecipient(attackerRecipient),
+        },
+      }
+
+      await expect(namespace.execute(tamperedQuote)).rejects.toBeInstanceOf(
+        QuoteCalldataRecipientMismatchError,
+      )
+      expect(provider.mockBuildApprovals).not.toHaveBeenCalled()
     })
   })
 
