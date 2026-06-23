@@ -1,66 +1,55 @@
-import type { ConnectedWallet } from '@privy-io/react-auth'
-import { toViemAccount } from '@privy-io/react-auth'
-import type { LocalAccount } from 'viem'
-import { toAccount } from 'viem/accounts'
+import * as PrivyReactAuth from '@privy-io/react-auth'
 import { describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createDivergingAccount,
+  createSigningAccount,
+  getRandomAddress,
+} from '@/__mocks__/utils.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { createSigner } from '@/wallet/react/wallets/hosted/privy/utils/createSigner.js'
 
-vi.mock('@privy-io/react-auth', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('@privy-io/react-auth')),
-  toViemAccount: vi.fn(),
-}))
+vi.mock('@privy-io/react-auth', async () => {
+  const actual = await vi.importActual<typeof PrivyReactAuth>(
+    '@privy-io/react-auth',
+  )
+  return {
+    ...actual,
+    toViemAccount: vi.fn(),
+  }
+})
 
-vi.mock('viem/accounts', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('viem/accounts')),
-  toAccount: vi.fn(),
-}))
+const mockConnectedWallet = {
+  walletClientType: 'privy',
+} as unknown as PrivyReactAuth.ConnectedWallet
 
-describe('createSigner', () => {
-  const mockAddress = getRandomAddress()
+type PrivyViemAccount = Awaited<ReturnType<typeof PrivyReactAuth.toViemAccount>>
 
-  it('should create a LocalAccount with correct configuration', async () => {
-    const mockConnectedWallet = {
-      address: mockAddress,
-      walletClientType: 'privy',
-    } as unknown as ConnectedWallet
+describe('createSigner (React Privy)', () => {
+  it('reconciles the re-wrapped vendor account and returns a signer', async () => {
+    const vendorAccount = createSigningAccount()
+    vi.mocked(PrivyReactAuth.toViemAccount).mockResolvedValue(
+      vendorAccount as unknown as PrivyViemAccount,
+    )
 
-    const mockPrivyViemAccount = {
-      address: mockAddress,
-      sign: vi.fn(),
-      signMessage: vi.fn(),
-      signTransaction: vi.fn(),
-      signTypedData: vi.fn(),
-    } as unknown as Awaited<ReturnType<typeof toViemAccount>>
+    const signer = await createSigner({ connectedWallet: mockConnectedWallet })
 
-    const mockLocalAccount = {
-      address: mockAddress,
-      sign: vi.fn(),
-      signMessage: vi.fn(),
-      signTransaction: vi.fn(),
-      signTypedData: vi.fn(),
-    } as unknown as LocalAccount
-
-    vi.mocked(toViemAccount).mockResolvedValue(mockPrivyViemAccount)
-    vi.mocked(toAccount).mockReturnValue(mockLocalAccount)
-
-    const signer = await createSigner({
-      connectedWallet: mockConnectedWallet,
-    })
-
-    expect(toViemAccount).toHaveBeenCalledWith({
+    expect(PrivyReactAuth.toViemAccount).toHaveBeenCalledWith({
       wallet: mockConnectedWallet,
     })
-    expect(toAccount).toHaveBeenCalledWith({
-      address: mockPrivyViemAccount.address,
-      sign: mockPrivyViemAccount.sign,
-      signMessage: mockPrivyViemAccount.signMessage,
-      signTransaction: mockPrivyViemAccount.signTransaction,
-      signTypedData: mockPrivyViemAccount.signTypedData,
-    })
-    expect(signer).toBe(mockLocalAccount)
+    expect(signer.address).toBe(vendorAccount.address)
+    expect(signer.type).toBe('local')
+  })
+
+  it('throws when the vendor account reports an address its key cannot sign for', async () => {
+    // Re-wrapped vendor account whose reported address diverges from its key.
+    const vendorAccount = createDivergingAccount(getRandomAddress())
+    vi.mocked(PrivyReactAuth.toViemAccount).mockResolvedValue(
+      vendorAccount as unknown as PrivyViemAccount,
+    )
+
+    await expect(
+      createSigner({ connectedWallet: mockConnectedWallet }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 })

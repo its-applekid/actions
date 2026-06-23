@@ -1,5 +1,5 @@
 import type { Address } from 'viem'
-import { isAddress } from 'viem'
+import { getAddress, isAddress } from 'viem'
 
 import {
   SUPPORTED_CHAIN_IDS,
@@ -78,6 +78,26 @@ export function validateAddress(
       received: address,
     })
   }
+}
+
+/**
+ * Validate and checksum-normalize a required EVM address.
+ * @throws InvalidParamsError when `isAddress` rejects the value.
+ */
+export function normalizeAddress(address: string, label: string): Address {
+  validateAddress(address, label)
+  return getAddress(address)
+}
+
+/**
+ * Validate and checksum-normalize an optional EVM address.
+ * @throws InvalidParamsError when the value is present and malformed.
+ */
+export function normalizeOptionalAddress(
+  address: string | undefined,
+  label: string,
+): Address | undefined {
+  return address === undefined ? undefined : normalizeAddress(address, label)
 }
 
 /**

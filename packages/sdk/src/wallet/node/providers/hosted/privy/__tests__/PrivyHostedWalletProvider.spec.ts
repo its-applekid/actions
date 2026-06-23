@@ -1,110 +1,111 @@
-import type { Address } from 'viem'
-import { getAddress } from 'viem'
+import * as PrivyNodeViem from '@privy-io/node/viem'
+import * as Viem from 'viem'
 import { unichain } from 'viem/chains'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createMockPrivyClient,
-  createMockPrivyWallet,
+  createPrivyKeyRegistry,
   getMockAuthorizationContext,
 } from '@/__mocks__/MockPrivyClient.js'
-import { getRandomAddress } from '@/__mocks__/utils.js'
 import { createMockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 import { PrivyHostedWalletProvider } from '@/wallet/node/providers/hosted/privy/PrivyHostedWalletProvider.js'
 import { PrivyWallet } from '@/wallet/node/wallets/hosted/privy/PrivyWallet.js'
 
+vi.mock('@privy-io/node/viem', async () => {
+  const actual = await vi.importActual<typeof PrivyNodeViem>(
+    '@privy-io/node/viem',
+  )
+  return {
+    ...actual,
+    createViemAccount: vi.fn(),
+  }
+})
+
 describe('PrivyHostedWalletProvider', () => {
   const mockChainManager = new MockChainManager({
     supportedChains: [unichain.id],
   }) as unknown as ChainManager
+  // Resolves walletId -> real signing key, while reporting the caller's address.
+  const privyKeys = createPrivyKeyRegistry()
+
+  function newProvider(actionProviders = {}): PrivyHostedWalletProvider {
+    return new PrivyHostedWalletProvider({
+      privyClient: createMockPrivyClient('app', 'secret'),
+      authorizationContext: getMockAuthorizationContext(),
+      chainManager: mockChainManager,
+      actionProviders,
+      actionSettings: {},
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(PrivyNodeViem.createViemAccount).mockImplementation(
+      (_client, params) =>
+        privyKeys.accountFor(
+          (params as { walletId: string }).walletId,
+          (params as { address: Viem.Address }).address,
+        ),
+    )
+  })
 
   describe('toActionsWallet', () => {
-    it('toActionsWallet creates an ActionsWallet with correct address and signer', async () => {
-      const privy = createMockPrivyClient('app', 'secret')
-      const provider = new PrivyHostedWalletProvider({
-        privyClient: privy,
-        authorizationContext: getMockAuthorizationContext(),
-        chainManager: mockChainManager,
-        actionProviders: {},
-        actionSettings: {},
-      })
+    it('creates an ActionsWallet with reconciled address and signer', async () => {
+      const walletId = 'wallet-to-actions'
+      const address = privyKeys.addressFor(walletId)
 
-      const hostedWallet = createMockPrivyWallet()
-
-      const actionsWallet = await provider.toActionsWallet({
-        walletId: hostedWallet.id,
-        address: hostedWallet.address as Address,
+      const actionsWallet = await newProvider().toActionsWallet({
+        walletId,
+        address,
       })
 
       expect(actionsWallet).toBeInstanceOf(Wallet)
-      expect(actionsWallet.address).toBe(hostedWallet.address)
-      expect(actionsWallet.signer.address).toBe(hostedWallet.address)
+      expect(actionsWallet.address).toBe(address)
+      expect(actionsWallet.signer.address).toBe(address)
     })
 
-    it('forwards params to PrivyWallet.create', async () => {
-      const privy = createMockPrivyClient('app', 'secret')
-      const authorizationContext = getMockAuthorizationContext()
-      const provider = new PrivyHostedWalletProvider({
-        privyClient: privy,
-        authorizationContext,
-        chainManager: mockChainManager,
-        actionProviders: {},
-        actionSettings: {},
-      })
+    it('forwards normalized params to PrivyWallet.create', async () => {
+      const walletId = 'wallet-forward'
+      const address = privyKeys.addressFor(walletId)
       const spy = vi.spyOn(PrivyWallet, 'create')
 
-      const id = 'mock-wallet-123'
-      const addr = getRandomAddress()
-
-      await provider.toActionsWallet({ walletId: id, address: addr })
+      await newProvider().toActionsWallet({
+        walletId,
+        address: `0x${address.slice(2).toLowerCase()}`,
+      })
 
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
-          privyClient: privy,
-          authorizationContext,
-          walletId: id,
-          address: getAddress(addr),
+          walletId,
+          address: Viem.getAddress(address),
           chainManager: mockChainManager,
         }),
       )
     })
 
     it('throws on invalid address', async () => {
-      const privy = createMockPrivyClient('app', 'secret')
-      const provider = new PrivyHostedWalletProvider({
-        privyClient: privy,
-        authorizationContext: getMockAuthorizationContext(),
-        chainManager: mockChainManager,
-        actionProviders: {},
-        actionSettings: {},
-      })
-
       await expect(
-        provider.toActionsWallet({ walletId: 'id', address: '0x123' }),
+        newProvider().toActionsWallet({
+          walletId: 'id',
+          address: '0x123',
+        }),
       ).rejects.toBeTruthy()
     })
 
     it('forwards lendProvider when provided to constructor', async () => {
-      const privy = createMockPrivyClient('app', 'secret')
       const mockLendProvider = createMockLendProvider()
-      const provider = new PrivyHostedWalletProvider({
-        privyClient: privy,
-        authorizationContext: getMockAuthorizationContext(),
-        chainManager: mockChainManager,
-        actionProviders: { lend: { morpho: mockLendProvider } },
-        actionSettings: {},
-      })
+      const provider = newProvider({ lend: { morpho: mockLendProvider } })
       const spy = vi.spyOn(PrivyWallet, 'create')
 
-      const id = 'mock-wallet-123'
-      const addr = getRandomAddress()
-
+      const walletId = 'wallet-lend'
       await provider.toActionsWallet({
-        walletId: id,
-        address: addr,
+        walletId,
+        address: privyKeys.addressFor(walletId),
       })
 
       expect(spy).toHaveBeenCalledWith(
@@ -118,25 +119,23 @@ describe('PrivyHostedWalletProvider', () => {
   })
 
   describe('createSigner', () => {
-    it('should create a LocalAccount with correct address', async () => {
-      const privy = createMockPrivyClient('app', 'secret')
-      const provider = new PrivyHostedWalletProvider({
-        privyClient: privy,
-        authorizationContext: getMockAuthorizationContext(),
-        chainManager: mockChainManager,
-        actionProviders: {},
-        actionSettings: {},
-      })
+    it('reconciles and returns a LocalAccount for a matching pair', async () => {
+      const walletId = 'signer-matched'
+      const address = privyKeys.addressFor(walletId)
 
-      const hostedWallet = createMockPrivyWallet()
+      const signer = await newProvider().createSigner({ walletId, address })
 
-      const signer = await provider.createSigner({
-        walletId: hostedWallet.id,
-        address: hostedWallet.address,
-      })
-
-      expect(signer.address).toBe(hostedWallet.address)
+      expect(signer.address).toBe(address)
       expect(signer.type).toBe('local')
+    })
+
+    it('throws when the (walletId, address) pair does not correspond', async () => {
+      const walletId = 'signer-a'
+      const wrongAddress = privyKeys.addressFor('signer-b')
+
+      await expect(
+        newProvider().createSigner({ walletId, address: wrongAddress }),
+      ).rejects.toThrow(SignerAddressMismatchError)
     })
   })
 })

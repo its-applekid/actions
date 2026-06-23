@@ -1,71 +1,65 @@
 import { isEthereumWallet } from '@dynamic-labs/ethereum'
-import type {
-  Address,
-  CustomSource,
-  Hash,
-  LocalAccount,
-  WalletClient,
-} from 'viem'
-import { createWalletClient } from 'viem'
-import { toAccount } from 'viem/accounts'
+import * as Viem from 'viem'
 import { unichain } from 'viem/chains'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/providers/hosted/types/index.js'
 import { DynamicWallet } from '@/wallet/react/wallets/hosted/dynamic/DynamicWallet.js'
 
-vi.mock('viem', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('viem')),
-  createWalletClient: vi.fn(),
-}))
-
-vi.mock('viem/accounts', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('viem/accounts')),
-  toAccount: vi.fn(),
-}))
+vi.mock('viem', async () => {
+  const actual = await vi.importActual<typeof Viem>('viem')
+  return {
+    ...actual,
+    createWalletClient: vi.fn(),
+  }
+})
 
 vi.mock('@dynamic-labs/ethereum', () => ({
   isEthereumWallet: vi.fn().mockReturnValue(true),
 }))
 
-const mockAddress = getRandomAddress()
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
-const mockLocalAccount = {
-  address: mockAddress,
-  signMessage: vi.fn(),
-  sign: vi.fn(),
-  signTransaction: vi.fn(),
-  signTypedData: vi.fn(),
-} as unknown as LocalAccount
 
-function createMockDynamicWallet(): DynamicHostedWalletToActionsWalletOptions['wallet'] {
+/**
+ * Build a Dynamic wallet whose underlying walletClient signs with a real key
+ * but reports `reportedAddress`. Omit `reportedAddress` for a matched wallet.
+ */
+function createMockDynamicWallet(
+  reportedAddress?: Viem.Address,
+): DynamicHostedWalletToActionsWalletOptions['wallet'] & {
+  __mock: { connector: { signRawMessage: ReturnType<typeof vi.fn> } }
+} {
+  const key = createSigningAccount()
   const mockConnector = {
     signRawMessage: vi.fn().mockResolvedValue('0xsigned'),
   }
   const mockWalletClient = {
-    account: { address: mockAddress },
-    signMessage: vi.fn(),
-    signTransaction: vi.fn(),
-    signTypedData: vi.fn(),
-  } as unknown as WalletClient
+    account: { address: reportedAddress ?? key.address },
+    signMessage: key.signMessage,
+    signTransaction: key.signTransaction,
+    signTypedData: key.signTypedData,
+  } as unknown as Viem.WalletClient
   return {
     connector: mockConnector,
     getWalletClient: vi.fn().mockResolvedValue(mockWalletClient),
-    __mock: { connector: mockConnector, walletClient: mockWalletClient },
-  }
+    __mock: { connector: mockConnector },
+  } as never
 }
 
 describe('DynamicWallet', () => {
-  it('should initialize signer and address from dynamic wallet', async () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(isEthereumWallet).mockReturnValue(true)
+  })
+
+  it('should initialize and reconcile signer and address from dynamic wallet', async () => {
     const dynamic = createMockDynamicWallet()
-    vi.mocked(toAccount).mockReturnValue(mockLocalAccount)
 
     const wallet = await DynamicWallet.create({
       dynamicWallet: dynamic,
@@ -74,43 +68,47 @@ describe('DynamicWallet', () => {
       actionSettings: {},
     })
 
-    expect(wallet.address).toBe(mockAddress)
+    expect(wallet.signer.type).toBe('local')
     expect(dynamic.getWalletClient).toHaveBeenCalled()
   })
 
-  it('should wire toAccount signer to connector.signRawMessage with 0x trim', async () => {
+  it('wires the signer to connector.signRawMessage with the 0x prefix trimmed', async () => {
     const dynamic = createMockDynamicWallet()
-    vi.mocked(toAccount).mockReturnValue(mockLocalAccount)
-
-    await DynamicWallet.create({
+    const wallet = await DynamicWallet.create({
       dynamicWallet: dynamic,
       chainManager: mockChainManager,
       actionProviders: {},
       actionSettings: {},
     })
 
-    const calls = vi.mocked(toAccount).mock.calls
-    const callArgs = calls[calls.length - 1][0] as CustomSource
-    expect(callArgs.address).toBe(dynamic.__mock.walletClient.account.address)
-
-    // Invoke the sign function and assert message formatting
-    await callArgs.sign!({ hash: '0xdeadbeef' })
+    await wallet.signer.sign!({ hash: '0xdeadbeef' })
     expect(dynamic.__mock.connector.signRawMessage).toHaveBeenCalledWith({
-      accountAddress: dynamic.__mock.walletClient.account.address,
+      accountAddress: wallet.address,
       message: 'deadbeef',
     })
 
-    await callArgs.sign!({ hash: 'cafebabe' as Hash })
+    await wallet.signer.sign!({ hash: 'cafebabe' as Viem.Hash })
     expect(dynamic.__mock.connector.signRawMessage).toHaveBeenCalledWith({
-      accountAddress: dynamic.__mock.walletClient.account.address,
+      accountAddress: wallet.address,
       message: 'cafebabe',
     })
   })
 
+  it('throws at construction when the reported address diverges from the signing backend', async () => {
+    const dynamic = createMockDynamicWallet(getRandomAddress())
+
+    const error = await DynamicWallet.create({
+      dynamicWallet: dynamic,
+      chainManager: mockChainManager,
+      actionProviders: {},
+      actionSettings: {},
+    }).catch((e: unknown) => e)
+
+    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+  })
+
   it('should create a wallet client with correct configuration', async () => {
     const dynamic = createMockDynamicWallet()
-    vi.mocked(toAccount).mockReturnValue(mockLocalAccount)
-
     const wallet = await DynamicWallet.create({
       dynamicWallet: dynamic,
       chainManager: mockChainManager,
@@ -119,17 +117,16 @@ describe('DynamicWallet', () => {
     })
 
     const mockWalletClient = {
-      account: mockLocalAccount,
-      address: mockAddress as Address,
-    } as unknown as WalletClient
-
-    vi.mocked(createWalletClient).mockResolvedValue(mockWalletClient)
+      account: wallet.signer,
+      address: wallet.address,
+    } as unknown as Viem.WalletClient
+    vi.mocked(Viem.createWalletClient).mockReturnValue(mockWalletClient)
 
     const walletClient = await wallet.walletClient(unichain.id)
 
-    expect(createWalletClient).toHaveBeenCalledOnce()
-    const args = vi.mocked(createWalletClient).mock.calls[0][0]
-    expect(args.account).toMatchObject({ address: mockLocalAccount.address })
+    expect(Viem.createWalletClient).toHaveBeenCalledOnce()
+    const args = vi.mocked(Viem.createWalletClient).mock.calls[0][0]
+    expect(args.account).toMatchObject({ address: wallet.address })
     expect(args.account).toHaveProperty('nonceManager')
     expect(args.chain).toBe(mockChainManager.getChain(unichain.id))
     expect(walletClient).toBe(mockWalletClient)
@@ -137,21 +134,19 @@ describe('DynamicWallet', () => {
 
   it('should throw if dynamic wallet is not EVM compatible', async () => {
     const dynamic = createMockDynamicWallet()
-    // Force isEthereumWallet to return false for this test
     vi.mocked(isEthereumWallet).mockReturnValueOnce(false)
 
-    try {
-      await DynamicWallet.create({
-        dynamicWallet: dynamic,
-        chainManager: mockChainManager,
-        actionProviders: {},
-        actionSettings: {},
-      })
-    } catch (err) {
-      expect((err as Error).message).toBe('Failed to initialize wallet')
-      expect((err as any).cause?.message).toBe(
-        'Wallet not connected or not EVM compatible',
-      )
-    }
+    const error = await DynamicWallet.create({
+      dynamicWallet: dynamic,
+      chainManager: mockChainManager,
+      actionProviders: {},
+      actionSettings: {},
+    }).catch((e: unknown) => e)
+
+    expect((error as Error).message).toBe('Failed to initialize wallet')
+    expect((error as Error).cause).toBeInstanceOf(Error)
+    expect(((error as Error).cause as Error).message).toBe(
+      'Wallet not connected or not EVM compatible',
+    )
   })
 })

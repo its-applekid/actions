@@ -1,4 +1,6 @@
 import type { PrivyClient } from '@privy-io/node'
+import { createViemAccount } from '@privy-io/node/viem'
+import type { Address } from 'viem'
 import { getAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { unichain } from 'viem/chains'
@@ -7,12 +9,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createMockPrivyClient,
   createMockPrivyWallet,
+  createPrivyKeyRegistry,
   getMockAuthorizationContext,
 } from '@/__mocks__/MockPrivyClient.js'
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createDivergingAccount, getRandomAddress } from '@/__mocks__/utils.js'
 import { MockBorrowProvider } from '@/actions/borrow/__mocks__/MockBorrowProvider.js'
 import { createMockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { ActionSettingsMap } from '@/types/actionRegistry.js'
@@ -22,19 +26,29 @@ import { DefaultSmartWalletProvider } from '@/wallet/core/providers/smart/defaul
 import { WalletProvider } from '@/wallet/core/providers/WalletProvider.js'
 import { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 import { DefaultSmartWallet } from '@/wallet/core/wallets/smart/default/DefaultSmartWallet.js'
+import { SmartWalletDeploymentError } from '@/wallet/core/wallets/smart/error/errors.js'
 import { PrivyHostedWalletProvider } from '@/wallet/node/providers/hosted/privy/PrivyHostedWalletProvider.js'
 
-import { SmartWalletDeploymentError } from '../../wallets/smart/error/errors.js'
+vi.mock('@privy-io/node/viem', () => ({
+  createViemAccount: vi.fn(),
+}))
 
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
 const mockLendProvider = createMockLendProvider()
+const privyKeys = createPrivyKeyRegistry()
 
 describe('WalletNamespace', () => {
   let mockPrivyClient: PrivyClient
   beforeEach(() => {
     mockPrivyClient = createMockPrivyClient('test-app-id', 'test-app-secret')
+    vi.mocked(createViemAccount).mockImplementation((_client, params) =>
+      privyKeys.accountFor(
+        (params as { walletId: string }).walletId,
+        (params as { address: Address }).address,
+      ),
+    )
   })
 
   afterEach(() => {
@@ -134,7 +148,7 @@ describe('WalletNamespace', () => {
       })
 
       // Create a hosted wallet to use as signer
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -182,7 +196,7 @@ describe('WalletNamespace', () => {
       })
 
       // Create a hosted wallet to use as signer
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -274,7 +288,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -323,7 +337,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -367,7 +381,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -426,6 +440,32 @@ describe('WalletNamespace', () => {
 
       expect(wallet.address).toBe(account.address)
       expect(wallet.signer).toBe(account)
+    })
+
+    it('does not silently route a divergent hosted-derived signer to LocalWallet (F215)', async () => {
+      const smartWalletProvider = new DefaultSmartWalletProvider({
+        chainManager: mockChainManager,
+        actionProviders: { lend: { morpho: mockLendProvider } },
+        actionSettings: {},
+      })
+      const walletProvider = new WalletProvider(undefined, smartWalletProvider)
+      const walletNamespace = new WalletNamespace(walletProvider, {
+        chainManager: mockChainManager,
+        actionProviders: {},
+        actionSettings: {},
+        supportedAssets: [],
+      })
+
+      // A hosted-derived signer is `type: 'local'`, so it routes through the
+      // LocalAccount branch. One whose key cannot sign for its reported address
+      // must be rejected, not silently wrapped in a usable LocalWallet.
+      const divergent = createDivergingAccount(getRandomAddress())
+
+      const error = await walletNamespace
+        .toActionsWallet(divergent)
+        .catch((e: unknown) => e)
+
+      expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
     })
 
     it('should expose lend namespace when an Aave provider is configured', async () => {
@@ -559,7 +599,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const params = {
         walletId: privyWallet.id,
         address: getAddress(privyWallet.address),
@@ -596,7 +636,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const signer = await walletNamespace.createSigner({
         walletId: privyWallet.id,
         address: getAddress(privyWallet.address),
@@ -615,3 +655,10 @@ describe('WalletNamespace', () => {
     })
   })
 })
+
+function createMatchedPrivyWallet(id = 'mock-wallet-1') {
+  return createMockPrivyWallet({
+    id,
+    address: privyKeys.addressFor(id),
+  })
+}

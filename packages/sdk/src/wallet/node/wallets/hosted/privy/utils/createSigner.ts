@@ -1,6 +1,8 @@
 import { createViemAccount } from '@privy-io/node/viem'
 import type { LocalAccount } from 'viem'
+import { getAddress } from 'viem'
 
+import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type {
   NodeOptionsMap,
   PrivyHostedWalletToActionsWalletOptions,
@@ -10,7 +12,10 @@ import type {
  * Create a LocalAccount from a Privy wallet
  * @description Converts the Privy wallet into a viem-compatible LocalAccount that can sign
  * messages and transactions. The returned account uses Privy's signing infrastructure
- * under the hood while providing a standard viem interface.
+ * under the hood while providing a standard viem interface. The caller-supplied
+ * `address` is normalized through `getAddress` and reconciled against the wallet's
+ * signing key, so a `(walletId, address)` pair that does not correspond fails at
+ * construction instead of silently signing for the wrong account.
  * @param params.walletId - Privy wallet identifier
  * @param params.address - Ethereum address of the wallet
  * @param params.privyClient - Privy client instance
@@ -18,17 +23,18 @@ import type {
  * Used when Privy needs to sign requests.
  * See https://docs.privy.io/controls/authorization-keys/using-owners/sign/automatic#using-the-authorization-context
  * for more information on building and using the authorization context.
- * @returns LocalAccount configured for signing operations
+ * @returns Promise resolving to a reconciled LocalAccount configured for signing operations
+ * @throws SignerAddressMismatchError if the signing key does not control the reported address
  * @throws Error if wallet retrieval fails or signing operations are not supported
  */
-export function createSigner(
+export async function createSigner(
   params: PrivyHostedWalletToActionsWalletOptions & NodeOptionsMap['privy'],
-): LocalAccount {
+): Promise<LocalAccount> {
   const { walletId, address, privyClient, authorizationContext } = params
   const account = createViemAccount(privyClient, {
     walletId,
-    address,
+    address: getAddress(address),
     authorizationContext,
   })
-  return account
+  return reconcileSignerAddress(account)
 }

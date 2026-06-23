@@ -21,6 +21,7 @@ import {
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
   SameAssetError,
+  SignerAddressMismatchError,
   SlippageOutOfRangeError,
   ZeroAddressError,
 } from '@/core/error/errors.js'
@@ -165,6 +166,22 @@ describe('ActionsError hierarchy', () => {
     expect(err.shortMessage).toContain('walletAddress')
   })
 
+  it('SignerAddressMismatchError', () => {
+    const err = new SignerAddressMismatchError({
+      reportedAddress: '0x0000000000000000000000000000000000000001',
+      recoveredAddress: '0x0000000000000000000000000000000000000002',
+    })
+    expect(err.name).toBe('SignerAddressMismatchError')
+    expect(err.reportedAddress).toBe(
+      '0x0000000000000000000000000000000000000001',
+    )
+    expect(err.recoveredAddress).toBe(
+      '0x0000000000000000000000000000000000000002',
+    )
+    expect(err).toBeInstanceOf(ActionsError)
+    expect(err.shortMessage).toContain('reported address')
+  })
+
   it('SlippageOutOfRangeError', () => {
     const err = new SlippageOutOfRangeError(0.6, 0.5)
     expect(err.name).toBe('SlippageOutOfRangeError')
@@ -238,6 +255,10 @@ describe('ActionsError hierarchy', () => {
       new QuoteRecipientMissingError(),
       new ExactOutputNotSupportedError('X'),
       new ZeroAddressError('label'),
+      new SignerAddressMismatchError({
+        reportedAddress: '0x0000000000000000000000000000000000000001',
+        recoveredAddress: '0x0000000000000000000000000000000000000002',
+      }),
       new SlippageOutOfRangeError(1, 0.5),
       new AssetNotSupportedOnChainError('X', 1),
       new NativeAssetAddressError('ETH'),

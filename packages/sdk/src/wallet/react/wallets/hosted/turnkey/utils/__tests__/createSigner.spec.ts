@@ -1,72 +1,103 @@
 import type { TurnkeySDKClientBase } from '@turnkey/react-wallet-kit'
 import { createAccount } from '@turnkey/viem'
-import type { LocalAccount } from 'viem'
-import { describe, expect, it, vi } from 'vitest'
+import type { Address } from 'viem'
+import { getAddress } from 'viem'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createMockTurnkeyClient,
+  createTurnkeyKeyRegistry,
+} from '@/__mocks__/MockTurnkeyClient.js'
+import {
+  InvalidParamsError,
+  SignerAddressMismatchError,
+} from '@/core/error/errors.js'
 import { createSigner } from '@/wallet/react/wallets/hosted/turnkey/utils/createSigner.js'
 
 vi.mock('@turnkey/viem', async () => ({
   createAccount: vi.fn(),
 }))
 
-function createMockTurnkeyClient(): TurnkeySDKClientBase {
-  return {
-    // minimal shape for typing; createAccount uses this via @turnkey/viem
-  } as unknown as TurnkeySDKClientBase
-}
-
 describe('createSigner (React Turnkey)', () => {
-  const mockAddress = getRandomAddress()
+  const client = createMockTurnkeyClient<TurnkeySDKClientBase>()
+  // Resolves signWith -> real signing key, reporting ethereumAddress when given.
+  const turnkeyKeys = createTurnkeyKeyRegistry()
 
-  it('should create a LocalAccount with correct configuration', async () => {
-    const mockLocalAccount = {
-      address: mockAddress,
-      signMessage: vi.fn(),
-      sign: vi.fn(),
-      signTransaction: vi.fn(),
-      signTypedData: vi.fn(),
-    } as unknown as LocalAccount
-    vi.mocked(createAccount).mockResolvedValue(mockLocalAccount)
-
-    const client = createMockTurnkeyClient()
-    const signer = await createSigner({
-      client,
-      organizationId: 'org_123',
-      signWith: 'key_abc',
-    })
-
-    expect(createAccount).toHaveBeenCalledWith({
-      client,
-      organizationId: 'org_123',
-      signWith: 'key_abc',
-      ethereumAddress: undefined,
-    })
-    expect(signer).toBe(mockLocalAccount)
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(createAccount).mockImplementation((params) =>
+      Promise.resolve(
+        turnkeyKeys.accountFor(
+          (params as { signWith: string }).signWith,
+          (params as { ethereumAddress?: Address }).ethereumAddress,
+        ),
+      ),
+    )
   })
 
-  it('should pass ethereumAddress when provided', async () => {
-    const mockLocalAccount = {
-      address: mockAddress,
-      type: 'local',
-    } as unknown as LocalAccount
-    vi.mocked(createAccount).mockResolvedValue(mockLocalAccount)
+  it('reconciles and returns a signer when ethereumAddress is omitted', async () => {
+    const signWith = 'key_react'
 
-    const client = createMockTurnkeyClient()
-    const ethereumAddress = getRandomAddress()
     const signer = await createSigner({
       client,
       organizationId: 'org_123',
-      signWith: 'key_abc',
-      ethereumAddress,
+      signWith,
     })
 
+    expect(signer.address).toBe(turnkeyKeys.addressFor(signWith))
     expect(createAccount).toHaveBeenCalledWith({
       client,
       organizationId: 'org_123',
-      signWith: 'key_abc',
+      signWith,
+      ethereumAddress: undefined,
+    })
+  })
+
+  it('reconciles a matching ethereumAddress', async () => {
+    const signWith = 'key_react_eth'
+    const expectedAddress = turnkeyKeys.addressFor(signWith)
+    const ethereumAddress = expectedAddress.toLowerCase()
+
+    const signer = await createSigner({
+      client,
+      organizationId: 'org_123',
+      signWith,
       ethereumAddress,
     })
-    expect(signer).toBe(mockLocalAccount)
+
+    expect(signer.address).toBe(expectedAddress)
+    expect(createAccount).toHaveBeenCalledWith({
+      client,
+      organizationId: 'org_123',
+      signWith,
+      ethereumAddress: getAddress(ethereumAddress),
+    })
+  })
+
+  it('throws when ethereumAddress is not controlled by the signWith key', async () => {
+    const signWith = 'key_react_a'
+    const wrongAddress = turnkeyKeys.addressFor('key_react_b')
+
+    await expect(
+      createSigner({
+        client,
+        organizationId: 'org_123',
+        signWith,
+        ethereumAddress: wrongAddress,
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
+  })
+
+  it('rejects a malformed ethereumAddress before calling Turnkey', async () => {
+    await expect(
+      createSigner({
+        client,
+        organizationId: 'org_123',
+        signWith: 'key_react_a',
+        ethereumAddress: '0xnotanaddress' as Address,
+      }),
+    ).rejects.toBeInstanceOf(InvalidParamsError)
+
+    expect(createAccount).not.toHaveBeenCalled()
   })
 })

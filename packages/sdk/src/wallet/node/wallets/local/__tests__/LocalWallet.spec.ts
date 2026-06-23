@@ -1,27 +1,28 @@
-import type { LocalAccount, WalletClient } from 'viem'
-import { createWalletClient } from 'viem'
+import * as Viem from 'viem'
 import { unichain } from 'viem/chains'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createDivergingAccount,
+  createSigningAccount,
+  getRandomAddress,
+} from '@/__mocks__/utils.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import { LocalWallet } from '@/wallet/node/wallets/local/LocalWallet.js'
 
-vi.mock('viem', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('viem')),
-  createWalletClient: vi.fn(),
-}))
+vi.mock('viem', async () => {
+  const actual = await vi.importActual<typeof Viem>('viem')
+  return {
+    ...actual,
+    createWalletClient: vi.fn(),
+  }
+})
 
-const mockAddress = getRandomAddress()
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
-
-function createMockLocalAccount(): LocalAccount {
-  return { address: mockAddress } as unknown as LocalAccount
-}
 
 describe('LocalWallet', () => {
   beforeEach(() => {
@@ -29,39 +30,53 @@ describe('LocalWallet', () => {
   })
 
   it('should set signer and address from provided LocalAccount', async () => {
-    const mockAccount = createMockLocalAccount()
+    const account = createSigningAccount()
 
     const wallet = await LocalWallet.create({
-      account: mockAccount,
+      account,
       chainManager: mockChainManager,
       actionProviders: {},
       actionSettings: {},
     })
 
-    expect(wallet.address).toBe(mockAddress)
-    expect(wallet.signer).toBe(mockAccount)
+    expect(wallet.address).toBe(account.address)
+    expect(wallet.signer).toBe(account)
+  })
+
+  it('throws at construction when the account cannot sign for its reported address', async () => {
+    // A hosted-derived signer collision routed in as a bare LocalAccount.
+    const account = createDivergingAccount(getRandomAddress())
+
+    const error = await LocalWallet.create({
+      account,
+      chainManager: mockChainManager,
+      actionProviders: {},
+      actionSettings: {},
+    }).catch((e: unknown) => e)
+
+    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('should create a wallet client with correct configuration', async () => {
-    const mockAccount = createMockLocalAccount()
+    const account = createSigningAccount()
     const wallet = await LocalWallet.create({
-      account: mockAccount,
+      account,
       chainManager: mockChainManager,
       actionProviders: {},
       actionSettings: {},
     })
 
     const mockWalletClient = {
-      account: mockAccount,
-      address: mockAddress,
-    } as unknown as WalletClient
-    vi.mocked(createWalletClient).mockResolvedValue(mockWalletClient)
+      account,
+      address: account.address,
+    } as unknown as Viem.WalletClient
+    vi.mocked(Viem.createWalletClient).mockReturnValue(mockWalletClient)
 
     const walletClient = await wallet.walletClient(unichain.id)
 
-    expect(createWalletClient).toHaveBeenCalledOnce()
-    const args = vi.mocked(createWalletClient).mock.calls[0][0]
-    expect(args.account).toMatchObject({ address: mockAccount.address })
+    expect(Viem.createWalletClient).toHaveBeenCalledOnce()
+    const args = vi.mocked(Viem.createWalletClient).mock.calls[0][0]
+    expect(args.account).toMatchObject({ address: account.address })
     expect(args.account).toHaveProperty('nonceManager')
     expect(args.chain).toBe(mockChainManager.getChain(unichain.id))
     expect(walletClient).toBe(mockWalletClient)

@@ -1,3 +1,5 @@
+import { createViemAccount } from '@privy-io/node/viem'
+import type { Address } from 'viem'
 import type { WaitForUserOperationReceiptReturnType } from 'viem/account-abstraction'
 import { unichain } from 'viem/chains'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -5,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createMockPrivyClient,
   createMockPrivyWallet,
+  createPrivyKeyRegistry,
   getMockAuthorizationContext,
 } from '@/__mocks__/MockPrivyClient.js'
 import { getRandomAddress } from '@/__mocks__/utils.js'
@@ -20,10 +23,15 @@ import { SmartWalletDeploymentError } from '@/wallet/core/wallets/smart/error/er
 import { PrivyHostedWalletProvider } from '@/wallet/node/providers/hosted/privy/PrivyHostedWalletProvider.js'
 import type { PrivyWallet } from '@/wallet/node/wallets/hosted/privy/PrivyWallet.js'
 
+vi.mock('@privy-io/node/viem', () => ({
+  createViemAccount: vi.fn(),
+}))
+
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
 const mockLendProvider = createMockLendProvider()
+const privyKeys = createPrivyKeyRegistry()
 
 describe('WalletProvider', () => {
   let mockPrivyClient: ReturnType<typeof createMockPrivyClient>
@@ -31,6 +39,12 @@ describe('WalletProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockPrivyClient = createMockPrivyClient('test-app-id', 'test-app-secret')
+    vi.mocked(createViemAccount).mockImplementation((_client, params) =>
+      privyKeys.accountFor(
+        (params as { walletId: string }).walletId,
+        (params as { address: Address }).address,
+      ),
+    )
   })
 
   describe('createSmartWallet', () => {
@@ -53,9 +67,10 @@ describe('WalletProvider', () => {
       )
 
       // Create a hosted wallet to use as signer
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = (await hostedWalletProvider.toActionsWallet({
-        walletId: 'mock-wallet-1',
-        address: getRandomAddress(),
+        walletId: privyWallet.id,
+        address: privyWallet.address,
       })) as PrivyWallet
       const signer = hostedWallet.signer
       const signers = [getRandomAddress(), hostedWallet.address]
@@ -109,9 +124,10 @@ describe('WalletProvider', () => {
         smartWalletProvider,
       )
 
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = (await hostedWalletProvider.toActionsWallet({
-        walletId: 'mock-wallet-1',
-        address: getRandomAddress(),
+        walletId: privyWallet.id,
+        address: privyWallet.address,
       })) as PrivyWallet
       const signer = hostedWallet.signer
       const signers = [getRandomAddress(), hostedWallet.address]
@@ -167,9 +183,10 @@ describe('WalletProvider', () => {
         smartWalletProvider,
       )
 
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = (await hostedWalletProvider.toActionsWallet({
-        walletId: 'mock-wallet-1',
-        address: getRandomAddress(),
+        walletId: privyWallet.id,
+        address: privyWallet.address,
       })) as PrivyWallet
       const signer = hostedWallet.signer
       const signers = [getRandomAddress(), hostedWallet.address]
@@ -223,9 +240,10 @@ describe('WalletProvider', () => {
         smartWalletProvider,
       )
 
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = (await hostedWalletProvider.toActionsWallet({
-        walletId: 'mock-wallet-1',
-        address: getRandomAddress(),
+        walletId: privyWallet.id,
+        address: privyWallet.address,
       })) as PrivyWallet
       const signer = hostedWallet.signer
       // Signer is NOT in the signers array
@@ -264,9 +282,10 @@ describe('WalletProvider', () => {
         smartWalletProvider,
       )
 
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = (await hostedWalletProvider.toActionsWallet({
-        walletId: 'mock-wallet-1',
-        address: getRandomAddress(),
+        walletId: privyWallet.id,
+        address: privyWallet.address,
       })) as PrivyWallet
       const signer = hostedWallet.signer
       const deploymentSigners = [hostedWallet.address, getRandomAddress()]
@@ -309,9 +328,10 @@ describe('WalletProvider', () => {
         smartWalletProvider,
       )
 
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = (await hostedWalletProvider.toActionsWallet({
-        walletId: 'mock-wallet-1',
-        address: getRandomAddress(),
+        walletId: privyWallet.id,
+        address: privyWallet.address,
       })) as PrivyWallet
       const signer = hostedWallet.signer
 
@@ -350,7 +370,7 @@ describe('WalletProvider', () => {
         'toActionsWallet',
       )
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const hostedWallet = await walletProvider.hostedWalletToActionsWallet({
         walletId: privyWallet.id,
         address: privyWallet.address,
@@ -390,7 +410,7 @@ describe('WalletProvider', () => {
       )
       const createSignerSpy = vi.spyOn(hostedWalletProvider, 'createSigner')
 
-      const privyWallet = createMockPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet()
       const params = {
         walletId: privyWallet.id,
         address: privyWallet.address,
@@ -404,3 +424,10 @@ describe('WalletProvider', () => {
     })
   })
 })
+
+function createMatchedPrivyWallet(id = 'mock-wallet-1') {
+  return createMockPrivyWallet({
+    id,
+    address: privyKeys.addressFor(id),
+  })
+}

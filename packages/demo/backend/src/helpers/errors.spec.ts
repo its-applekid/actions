@@ -18,6 +18,7 @@ import {
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
+  SignerAddressMismatchError,
   ZeroAddressError,
 } from '@eth-optimism/actions-sdk'
 import { describe, expect, it } from 'vitest'
@@ -219,6 +220,20 @@ describe('mapSdkError', () => {
     ).toEqual({
       status: 503,
       message: 'Protocol contracts are not configured for this chain.',
+    })
+  })
+
+  it('maps SignerAddressMismatchError to 400', () => {
+    expect(
+      mapSdkError(
+        new SignerAddressMismatchError({
+          reportedAddress: '0x0000000000000000000000000000000000000001',
+          recoveredAddress: '0x0000000000000000000000000000000000000002',
+        }),
+      ),
+    ).toEqual({
+      status: 400,
+      message: 'Wallet signer does not match its reported address.',
     })
   })
 

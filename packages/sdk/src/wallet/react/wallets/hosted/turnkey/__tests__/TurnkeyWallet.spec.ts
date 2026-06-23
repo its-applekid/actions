@@ -1,104 +1,128 @@
 import type { TurnkeySDKClientBase } from '@turnkey/react-wallet-kit'
 import { createAccount } from '@turnkey/viem'
-import type { LocalAccount, WalletClient } from 'viem'
-import { createWalletClient } from 'viem'
+import * as Viem from 'viem'
 import { unichain } from 'viem/chains'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createMockTurnkeyClient,
+  createTurnkeyKeyRegistry,
+} from '@/__mocks__/MockTurnkeyClient.js'
+import {
+  InvalidParamsError,
+  SignerAddressMismatchError,
+} from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import { TurnkeyWallet } from '@/wallet/react/wallets/hosted/turnkey/TurnkeyWallet.js'
 
-vi.mock('viem', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('viem')),
-  createWalletClient: vi.fn(),
-}))
+vi.mock('viem', async () => {
+  const actual = await vi.importActual<typeof Viem>('viem')
+  return {
+    ...actual,
+    createWalletClient: vi.fn(),
+  }
+})
 
 vi.mock('@turnkey/viem', async () => ({
   createAccount: vi.fn(),
 }))
 
-const mockAddress = getRandomAddress()
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
+const client = createMockTurnkeyClient<TurnkeySDKClientBase>()
+// Resolves signWith -> real signing key, reporting ethereumAddress when given.
+const turnkeyKeys = createTurnkeyKeyRegistry()
 
-function createMockTurnkeyClient(): TurnkeySDKClientBase {
-  return {
-    // minimal shape for typing; createAccount uses this via @turnkey/viem
-  } as unknown as TurnkeySDKClientBase
+function createTurnkeyWallet(params: {
+  signWith: string
+  ethereumAddress?: string
+}) {
+  return TurnkeyWallet.create({
+    client,
+    organizationId: 'org_123',
+    signWith: params.signWith,
+    ethereumAddress: params.ethereumAddress,
+    chainManager: mockChainManager,
+    actionProviders: {},
+    actionSettings: {},
+  })
 }
 
-describe('TurnkeyWallet', () => {
+describe('TurnkeyWallet (React)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(createAccount).mockImplementation((params) =>
+      Promise.resolve(
+        turnkeyKeys.accountFor(
+          (params as { signWith: string }).signWith,
+          (params as { ethereumAddress?: Viem.Address }).ethereumAddress,
+        ),
+      ),
+    )
   })
 
   it('should initialize signer and address from Turnkey account', async () => {
-    const mockLocalAccount = { address: mockAddress } as unknown as LocalAccount
-    vi.mocked(createAccount).mockResolvedValue(mockLocalAccount)
+    const signWith = 'key_abc'
+    const expectedAddress = turnkeyKeys.addressFor(signWith)
 
-    const wallet = await TurnkeyWallet.create({
-      client: createMockTurnkeyClient(),
-      organizationId: 'org_123',
-      signWith: 'key_abc',
-      chainManager: mockChainManager,
-      actionProviders: {},
-      actionSettings: {},
-    })
+    const wallet = await createTurnkeyWallet({ signWith })
 
-    expect(wallet.address).toBe(mockAddress)
-    expect(wallet.signer).toBe(mockLocalAccount)
+    expect(wallet.address).toBe(expectedAddress)
+    expect(wallet.signer.address).toBe(expectedAddress)
     expect(createAccount).toHaveBeenCalledOnce()
     const args = vi.mocked(createAccount).mock.calls[0][0]
-    expect(args.client).toEqual(createMockTurnkeyClient())
-    expect(args.organizationId).toBe('org_123')
-    expect(args.signWith).toBe('key_abc')
+    expect(args.signWith).toBe(signWith)
     expect(args.ethereumAddress).toBeUndefined()
   })
 
-  it('takes ethereumAddress', async () => {
-    const mockLocalAccount = { address: mockAddress } as unknown as LocalAccount
-    vi.mocked(createAccount).mockResolvedValue(mockLocalAccount)
+  it('takes a matching ethereumAddress', async () => {
+    const signWith = 'key_with_eth'
+    const ethereumAddress = turnkeyKeys.addressFor(signWith)
 
-    await TurnkeyWallet.create({
-      client: createMockTurnkeyClient(),
-      organizationId: 'org_123',
-      signWith: 'key_abc',
+    const wallet = await createTurnkeyWallet({ signWith, ethereumAddress })
+
+    expect(wallet.address).toBe(ethereumAddress)
+    expect(vi.mocked(createAccount).mock.calls[0][0].ethereumAddress).toBe(
+      ethereumAddress,
+    )
+  })
+
+  it('throws at construction when ethereumAddress is not controlled by signWith', async () => {
+    const error = await createTurnkeyWallet({
+      signWith: 'key_x',
+      ethereumAddress: turnkeyKeys.addressFor('key_y'),
+    }).catch((e: unknown) => e)
+
+    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+  })
+
+  it('throws at construction on a malformed ethereumAddress', async () => {
+    const error = await createTurnkeyWallet({
+      signWith: 'key_x',
       ethereumAddress: '0x123',
-      chainManager: mockChainManager,
-      actionProviders: {},
-      actionSettings: {},
-    })
+    }).catch((e: unknown) => e)
 
-    const args = vi.mocked(createAccount).mock.calls[0][0]
-    expect(args.ethereumAddress).toBe('0x123')
+    expect((error as Error).cause).toBeInstanceOf(InvalidParamsError)
   })
 
   it('should create a wallet client with correct configuration', async () => {
-    const mockLocalAccount = { address: mockAddress } as unknown as LocalAccount
-    vi.mocked(createAccount).mockResolvedValue(mockLocalAccount)
-    const wallet = await TurnkeyWallet.create({
-      client: createMockTurnkeyClient(),
-      organizationId: 'org_123',
-      signWith: 'key_abc',
-      chainManager: mockChainManager,
-      actionProviders: {},
-      actionSettings: {},
-    })
+    const signWith = 'key_client'
+    const expectedAddress = turnkeyKeys.addressFor(signWith)
+    const wallet = await createTurnkeyWallet({ signWith })
+
     const mockWalletClient = {
-      account: mockLocalAccount,
-      address: mockAddress,
-    } as unknown as WalletClient
-    vi.mocked(createWalletClient).mockResolvedValue(mockWalletClient)
+      account: wallet.signer,
+      address: expectedAddress,
+    } as unknown as Viem.WalletClient
+    vi.mocked(Viem.createWalletClient).mockReturnValue(mockWalletClient)
 
     const walletClient = await wallet.walletClient(unichain.id)
 
-    expect(createWalletClient).toHaveBeenCalledOnce()
-    const args = vi.mocked(createWalletClient).mock.calls[0][0]
-    expect(args.account).toMatchObject({ address: mockLocalAccount.address })
+    expect(Viem.createWalletClient).toHaveBeenCalledOnce()
+    const args = vi.mocked(Viem.createWalletClient).mock.calls[0][0]
+    expect(args.account).toMatchObject({ address: expectedAddress })
     expect(args.account).toHaveProperty('nonceManager')
     expect(args.chain).toBe(mockChainManager.getChain(unichain.id))
     expect(walletClient).toBe(mockWalletClient)

@@ -1,8 +1,9 @@
 import type { AuthorizationContext, PrivyClient } from '@privy-io/node'
-import type { Address } from 'viem'
+import type { Address, LocalAccount } from 'viem'
+import { getAddress } from 'viem'
 import { generatePrivateKey } from 'viem/accounts'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
 
 /**
  * Mock Privy Client for testing
@@ -47,5 +48,35 @@ export function getMockAuthorizationContext(
 ): AuthorizationContext {
   return {
     authorization_private_keys: [privateKey ?? generatePrivateKey()],
+  }
+}
+
+/**
+ * Registry that models Privy's `createViemAccount` contract for tests: the
+ * signing key is resolved from `walletId`, while the reported `.address` is
+ * taken from the caller. A matched `(walletId, address)` pair reconciles; a
+ * pair pointing at a different wallet's address is detectably divergent, which
+ * is exactly the misconfiguration the reconciliation seam guards against.
+ */
+export function createPrivyKeyRegistry() {
+  const keysByWalletId = new Map<string, LocalAccount>()
+  const keyFor = (walletId: string): LocalAccount => {
+    const existing = keysByWalletId.get(walletId)
+    if (existing) return existing
+    const key = createSigningAccount()
+    keysByWalletId.set(walletId, key)
+    return key
+  }
+  return {
+    /** Address the given walletId's signing key actually controls. */
+    addressFor: (walletId: string): Address => keyFor(walletId).address,
+    /**
+     * Account that signs with `walletId`'s key but reports `reportedAddress`,
+     * mirroring `createViemAccount(client, { walletId, address })`.
+     */
+    accountFor: (walletId: string, reportedAddress: Address): LocalAccount => ({
+      ...keyFor(walletId),
+      address: getAddress(reportedAddress),
+    }),
   }
 }

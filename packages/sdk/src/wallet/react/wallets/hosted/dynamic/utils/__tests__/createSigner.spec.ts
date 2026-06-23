@@ -1,82 +1,63 @@
 import { isEthereumWallet } from '@dynamic-labs/ethereum'
 import type { DynamicWaasEVMConnector } from '@dynamic-labs/waas-evm'
 import type { Wallet } from '@dynamic-labs/wallet-connector-core'
-import type { LocalAccount, WalletClient } from 'viem'
-import { toAccount } from 'viem/accounts'
+import type { Address, WalletClient } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { createSigner } from '@/wallet/react/wallets/hosted/dynamic/utils/createSigner.js'
 
 vi.mock('@dynamic-labs/ethereum', async () => ({
   isEthereumWallet: vi.fn(),
 }))
 
-vi.mock('viem/accounts', async () => ({
-  // @ts-ignore - importActual returns unknown
-  ...(await vi.importActual('viem/accounts')),
-  toAccount: vi.fn(),
-}))
+/**
+ * Build a Dynamic wallet whose underlying walletClient signs with a real key
+ * but reports `reportedAddress`. Omit `reportedAddress` for a matched wallet.
+ */
+function createMockDynamicWallet(reportedAddress?: Address): Wallet {
+  const key = createSigningAccount()
+  const mockWalletClient = {
+    account: { address: reportedAddress ?? key.address },
+    signMessage: key.signMessage,
+    signTransaction: key.signTransaction,
+    signTypedData: key.signTypedData,
+  } as unknown as WalletClient
+  const mockConnector = {
+    signRawMessage: vi.fn(),
+  } as unknown as DynamicWaasEVMConnector
+  return {
+    getWalletClient: vi.fn().mockResolvedValue(mockWalletClient),
+    connector: mockConnector,
+  } as unknown as Wallet
+}
 
 describe('createSigner (React Dynamic)', () => {
-  const mockAddress = getRandomAddress()
-
-  it('should create a LocalAccount with correct configuration', async () => {
-    const mockWalletClient = {
-      account: {
-        address: mockAddress,
-      },
-      signMessage: vi.fn(),
-      signTransaction: vi.fn(),
-      signTypedData: vi.fn(),
-    } as unknown as WalletClient
-
-    const mockConnector = {
-      signRawMessage: vi.fn(),
-    } as unknown as DynamicWaasEVMConnector
-
-    const mockWallet = {
-      getWalletClient: vi.fn().mockResolvedValue(mockWalletClient),
-      connector: mockConnector,
-    } as unknown as Wallet
-
-    const mockLocalAccount = {
-      address: mockAddress,
-      sign: vi.fn(),
-      signMessage: vi.fn(),
-      signTransaction: vi.fn(),
-      signTypedData: vi.fn(),
-    } as unknown as LocalAccount
-
+  it('reconciles the connector-backed account and returns a signer', async () => {
     vi.mocked(isEthereumWallet).mockReturnValue(true)
-    vi.mocked(toAccount).mockReturnValue(mockLocalAccount)
+    const wallet = createMockDynamicWallet()
 
-    const signer = await createSigner({
-      wallet: mockWallet,
-    })
+    const signer = await createSigner({ wallet })
 
-    expect(isEthereumWallet).toHaveBeenCalledWith(mockWallet)
-    expect(mockWallet.getWalletClient).toHaveBeenCalled()
-    expect(toAccount).toHaveBeenCalledWith(
-      expect.objectContaining({
-        address: mockAddress,
-        signMessage: mockWalletClient.signMessage,
-        signTransaction: mockWalletClient.signTransaction,
-        signTypedData: mockWalletClient.signTypedData,
-      }),
+    expect(isEthereumWallet).toHaveBeenCalledWith(wallet)
+    expect(signer.type).toBe('local')
+  })
+
+  it('throws when walletClient.account.address is not controlled by the signing backend', async () => {
+    vi.mocked(isEthereumWallet).mockReturnValue(true)
+    const wallet = createMockDynamicWallet(getRandomAddress())
+
+    await expect(createSigner({ wallet })).rejects.toBeInstanceOf(
+      SignerAddressMismatchError,
     )
-    expect(signer).toBe(mockLocalAccount)
   })
 
   it('should throw error for non-Ethereum wallet', async () => {
-    const mockWallet = {} as unknown as Wallet
-
     vi.mocked(isEthereumWallet).mockReturnValue(false)
 
     await expect(
-      createSigner({
-        wallet: mockWallet,
-      }),
+      createSigner({ wallet: {} as unknown as Wallet }),
     ).rejects.toThrow('Wallet not connected or not EVM compatible')
   })
 })

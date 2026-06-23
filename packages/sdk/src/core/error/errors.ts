@@ -239,6 +239,34 @@ export class ZeroAddressError extends ActionsError {
   }
 }
 
+/**
+ * Thrown when a wallet's reported address is not controlled by its signing key.
+ * @description Every hosted wallet (Privy, Turnkey, Dynamic) exposes a reported
+ * `.address` and a separate signing backend. When the two diverge, for example
+ * mismatched Privy `(walletId, address)` pair, a Turnkey
+ * `ethereumAddress`/`signWith` mismatch, or a re-wrapped vendor account, the SDK
+ * would build, approve, and sign against an account the key cannot control.
+ * The reconciliation seam signs a fixed self-test message and surfaces this at
+ * construction time instead of letting it become a wrong-account signature.
+ */
+export class SignerAddressMismatchError extends ActionsError {
+  override name = 'SignerAddressMismatchError' as const
+  reportedAddress: string
+  recoveredAddress: string
+
+  constructor(params: { reportedAddress: string; recoveredAddress: string }) {
+    super('Signer does not control its reported address', {
+      metaMessages: [
+        `Reported address: ${params.reportedAddress}`,
+        `Signing key recovers to: ${params.recoveredAddress}`,
+        'The signing key cannot control the reported address; signatures would target the wrong account.',
+      ],
+    })
+    this.reportedAddress = params.reportedAddress
+    this.recoveredAddress = params.recoveredAddress
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Slippage
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import type { AuthorizationContext, PrivyClient } from '@privy-io/node'
-import { type Address, type LocalAccount } from 'viem'
+import { type Address, getAddress, type LocalAccount } from 'viem'
 
 import type { BaseWalletCreateOptions } from '@/wallet/core/wallets/abstract/Wallet.js'
 import { EOAWallet } from '@/wallet/core/wallets/eoa/EOAWallet.js'
@@ -33,7 +33,7 @@ export class PrivyWallet extends EOAWallet {
     this.privyClient = params.privyClient
     this.authorizationContext = params.authorizationContext
     this.walletId = params.walletId
-    this.address = params.address
+    this.address = getAddress(params.address)
   }
 
   static async create(params: PrivyWalletCreateOptions): Promise<PrivyWallet> {
@@ -45,7 +45,7 @@ export class PrivyWallet extends EOAWallet {
   /**
    * Initialize the PrivyWallet by creating the signer account
    */
-  protected async performInitialization() {
+  protected override async performInitialization(): Promise<void> {
     this.signer = await this.createSigner()
   }
 

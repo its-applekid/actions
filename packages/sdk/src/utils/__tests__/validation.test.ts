@@ -7,6 +7,8 @@ import {
   ZeroAddressError,
 } from '@/core/error/errors.js'
 import {
+  normalizeAddress,
+  normalizeOptionalAddress,
   resolveSupportedChainIds,
   validateWalletAddress,
 } from '@/utils/validation.js'
@@ -46,5 +48,39 @@ describe('validateWalletAddress', () => {
     expect(() =>
       validateWalletAddress('0x0000000000000000000000000000000000000000'),
     ).toThrow(ZeroAddressError)
+  })
+})
+
+describe('normalizeAddress', () => {
+  it('returns the checksum-normalized address', () => {
+    expect(
+      normalizeAddress(
+        '0x000000000000000000000000000000000000beef',
+        'ethereumAddress',
+      ),
+    ).toBe('0x000000000000000000000000000000000000bEEF')
+  })
+
+  it('throws InvalidParamsError for a malformed address', () => {
+    expect(() => normalizeAddress('0x1', 'ethereumAddress')).toThrow(
+      InvalidParamsError,
+    )
+  })
+})
+
+describe('normalizeOptionalAddress', () => {
+  it('returns undefined when address is omitted', () => {
+    expect(
+      normalizeOptionalAddress(undefined, 'ethereumAddress'),
+    ).toBeUndefined()
+  })
+
+  it('returns the checksum-normalized address when present', () => {
+    expect(
+      normalizeOptionalAddress(
+        '0x000000000000000000000000000000000000beef',
+        'ethereumAddress',
+      ),
+    ).toBe('0x000000000000000000000000000000000000bEEF')
   })
 })

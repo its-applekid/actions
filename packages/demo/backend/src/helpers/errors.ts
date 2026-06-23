@@ -18,6 +18,7 @@ import {
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
+  SignerAddressMismatchError,
   TransactionConfirmedButRevertedError,
   ZeroAddressError,
 } from '@eth-optimism/actions-sdk'
@@ -163,6 +164,13 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
       {
         status: 503,
         message: 'Protocol contracts are not configured for this chain.',
+      },
+    ],
+    [
+      SignerAddressMismatchError,
+      {
+        status: 400,
+        message: 'Wallet signer does not match its reported address.',
       },
     ],
   ]
