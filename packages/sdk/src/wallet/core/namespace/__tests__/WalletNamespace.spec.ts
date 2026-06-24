@@ -442,7 +442,7 @@ describe('WalletNamespace', () => {
       expect(wallet.signer).toBe(account)
     })
 
-    it('does not silently route a divergent hosted-derived signer to LocalWallet (F215)', async () => {
+    it('does not silently route a divergent hosted-derived signer to LocalWallet', async () => {
       const smartWalletProvider = new DefaultSmartWalletProvider({
         chainManager: mockChainManager,
         actionProviders: { lend: { morpho: mockLendProvider } },
@@ -456,9 +456,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      // A hosted-derived signer is `type: 'local'`, so it routes through the
-      // LocalAccount branch. One whose key cannot sign for its reported address
-      // must be rejected, not silently wrapped in a usable LocalWallet.
+      // Hosted-derived local accounts must still prove control of their reported address.
       const divergent = createDivergingAccount(getRandomAddress())
 
       await expect(
