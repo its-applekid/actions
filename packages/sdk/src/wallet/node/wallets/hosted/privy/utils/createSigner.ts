@@ -1,7 +1,7 @@
 import { createViemAccount } from '@privy-io/node/viem'
 import type { LocalAccount } from 'viem'
-import { getAddress } from 'viem'
 
+import { normalizeAddress } from '@/utils/validation.js'
 import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type {
   NodeOptionsMap,
@@ -13,8 +13,8 @@ import type {
  * @description Converts the Privy wallet into a viem-compatible LocalAccount that can sign
  * messages and transactions. The returned account uses Privy's signing infrastructure
  * under the hood while providing a standard viem interface. The caller-supplied
- * `address` is normalized through `getAddress` and reconciled against the wallet's
- * signing key, so a `(walletId, address)` pair that does not correspond fails at
+ * `address` is validated, normalized, and reconciled against the wallet's signing
+ * key, so a `(walletId, address)` pair that does not correspond fails at
  * construction instead of silently signing for the wrong account.
  * @param params.walletId - Privy wallet identifier
  * @param params.address - Ethereum address of the wallet
@@ -33,7 +33,7 @@ export async function createSigner(
   const { walletId, address, privyClient, authorizationContext } = params
   const account = createViemAccount(privyClient, {
     walletId,
-    address: getAddress(address),
+    address: normalizeAddress(address, 'address'),
     authorizationContext,
   })
   return reconcileSignerAddress(account)

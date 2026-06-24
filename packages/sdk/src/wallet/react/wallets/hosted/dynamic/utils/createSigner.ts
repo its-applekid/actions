@@ -1,9 +1,9 @@
 import { isEthereumWallet } from '@dynamic-labs/ethereum'
 import type { DynamicWaasEVMConnector } from '@dynamic-labs/waas-evm'
 import type { LocalAccount } from 'viem'
-import { getAddress } from 'viem'
 import { toAccount } from 'viem/accounts'
 
+import { normalizeAddress } from '@/utils/validation.js'
 import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/providers/hosted/types/index.js'
 
@@ -12,9 +12,9 @@ import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/p
  * @description Converts the Dynamic wallet into a viem-compatible LocalAccount that can sign
  * messages and transactions. The returned account uses Dynamic's signing infrastructure
  * under the hood while providing a standard viem interface. The wallet client's reported
- * address is normalized through `getAddress` and reconciled against the connector signing
- * backend, so a wallet whose reported address diverges from its key fails at construction
- * instead of silently signing for the wrong account.
+ * address is validated, normalized, and reconciled against the connector signing
+ * backend, so a wallet whose reported address diverges from its key fails at
+ * construction instead of silently signing for the wrong account.
  * @param params.dynamicWallet - Dynamic wallet instance
  * @returns Promise resolving to a reconciled LocalAccount configured for signing operations
  * @throws SignerAddressMismatchError if the signing backend does not control the reported address
@@ -29,7 +29,10 @@ export async function createSigner(
   }
   const walletClient = await wallet.getWalletClient()
   const connector = wallet.connector as DynamicWaasEVMConnector
-  const accountAddress = getAddress(walletClient.account.address)
+  const accountAddress = normalizeAddress(
+    walletClient.account.address,
+    'walletClient.account.address',
+  )
   const account = toAccount({
     address: accountAddress,
     sign: ({ hash }) => {

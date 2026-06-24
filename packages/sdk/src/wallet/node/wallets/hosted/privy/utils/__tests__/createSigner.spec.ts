@@ -7,7 +7,10 @@ import {
   createPrivyKeyRegistry,
   getMockAuthorizationContext,
 } from '@/__mocks__/MockPrivyClient.js'
-import { SignerAddressMismatchError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  SignerAddressMismatchError,
+} from '@/core/error/errors.js'
 import { createSigner } from '@/wallet/node/wallets/hosted/privy/utils/createSigner.js'
 
 vi.mock('@privy-io/node/viem', async () => {
@@ -30,6 +33,7 @@ describe('createSigner (Node Privy)', () => {
   const privyKeys = createPrivyKeyRegistry()
 
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.mocked(PrivyNodeViem.createViemAccount).mockImplementation(
       (_client, params) =>
         privyKeys.accountFor(
@@ -95,6 +99,8 @@ describe('createSigner (Node Privy)', () => {
         walletId: 'wallet-a',
         address: '0x123',
       }),
-    ).rejects.toBeTruthy()
+    ).rejects.toBeInstanceOf(InvalidParamsError)
+
+    expect(PrivyNodeViem.createViemAccount).not.toHaveBeenCalled()
   })
 })

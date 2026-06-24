@@ -1,3 +1,4 @@
+import type { Address } from 'viem'
 import { BaseError } from 'viem'
 
 /**
@@ -251,10 +252,10 @@ export class ZeroAddressError extends ActionsError {
  */
 export class SignerAddressMismatchError extends ActionsError {
   override name = 'SignerAddressMismatchError' as const
-  reportedAddress: string
-  recoveredAddress: string
+  reportedAddress: Address
+  recoveredAddress: Address
 
-  constructor(params: { reportedAddress: string; recoveredAddress: string }) {
+  constructor(params: { reportedAddress: Address; recoveredAddress: Address }) {
     super('Signer does not control its reported address', {
       metaMessages: [
         `Reported address: ${params.reportedAddress}`,
