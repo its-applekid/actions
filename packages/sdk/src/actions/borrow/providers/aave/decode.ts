@@ -160,7 +160,7 @@ function assertPoolRepay(
   assertBorrowAction(quote.action, ['repay', 'close'], 'repay')
   assertReserve(args[0], market.aave.debtReserve)
   assertAmountField('repay amount', args[1], quote.borrowAmountRaw, {
-    allowMax: true,
+    allowMax: quoteAllowsMaxBorrowAmount(quote),
   })
   assertAmountField('rate mode', args[2], VARIABLE_RATE_MODE)
   assertAddressField('onBehalfOf', args[3], walletAddress)
@@ -187,7 +187,7 @@ function assertPoolWithdraw(
   assertBorrowAction(quote.action, ['withdrawCollateral', 'close'], 'withdraw')
   assertReserve(args[0], market.aave.collateralReserve)
   assertAmountField('collateral amount', args[1], quote.collateralAmountRaw, {
-    allowMax: true,
+    allowMax: quoteAllowsMaxCollateralAmount(quote),
   })
   assertAddressField('to', args[2], walletAddress)
 }
@@ -224,7 +224,7 @@ function assertGatewayWithdraw(
   assertZeroValue(transaction)
   assertAddressField('pool', args[0], pool)
   assertAmountField('collateral amount', args[1], quote.collateralAmountRaw, {
-    allowMax: true,
+    allowMax: quoteAllowsMaxCollateralAmount(quote),
   })
   assertAddressField('to', args[2], walletAddress)
 }
@@ -303,4 +303,12 @@ function assertZeroValue(transaction: TransactionData): void {
 
 function assertReserve(actual: Address, expected: Address): void {
   assertAddressField('reserve', actual, expected)
+}
+
+function quoteAllowsMaxBorrowAmount(quote: BorrowQuote): boolean {
+  return quote.execution.providerContext?.borrowAmountIsMax === true
+}
+
+function quoteAllowsMaxCollateralAmount(quote: BorrowQuote): boolean {
+  return quote.execution.providerContext?.collateralAmountIsMax === true
 }

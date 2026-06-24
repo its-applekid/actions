@@ -1,6 +1,7 @@
 import {
   type Address,
   decodeFunctionData,
+  encodeFunctionData,
   erc20Abi,
   maxUint256,
   type PublicClient,
@@ -26,7 +27,7 @@ import type { Asset } from '@/types/asset.js'
 import type { AaveBorrowMarketConfig } from '@/types/borrow/index.js'
 
 const OPS = optimismSepolia.id
-const A_WETH = '0x00000000000000000000000000000000000Aae71' as Address
+const A_WETH = '0x00000000000000000000000000000000000aae71' as Address
 const VAR_DEBT_USDC = '0x00000000000000000000000000000000000aDeb7' as Address
 const WALLET = '0x000000000000000000000000000000000000beef' as Address
 
@@ -284,6 +285,42 @@ describe('AaveBorrowProvider write layer', () => {
     expect(repay.args[1]).toBe(500_000_000n)
   })
 
+  it('rejects maxUint256 repay calldata without max quote intent', async () => {
+    const provider = makeProvider({
+      collateral: 10n ** 18n,
+      debt: 1_000_000_000n,
+      allowance: maxUint256,
+    })
+    const quote = await provider.repay({
+      market,
+      walletAddress: WALLET,
+      amount: { amountRaw: 500_000_000n },
+    })
+    const repay = quote.execution.transactions[0]
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: {
+            ...quote.execution,
+            transactions: [
+              {
+                ...repay,
+                data: encodeFunctionData({
+                  abi: POOL_ABI,
+                  functionName: 'repay',
+                  args: [USDC, maxUint256, 2n, WALLET],
+                }),
+              },
+            ],
+          },
+        },
+        WALLET,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
+  })
+
   it('uses maxUint256 on a full repay and skips approval when allowed', async () => {
     const provider = makeProvider({
       collateral: 10n ** 18n,
@@ -304,6 +341,7 @@ describe('AaveBorrowProvider write layer', () => {
     expect(repay.functionName).toBe('repay')
     expect(repay.args[1]).toBe(maxUint256)
     expect(quote.positionAfter.borrowAmount).toBe(0n)
+    expect(() => provider.validateQuoteExecution(quote, WALLET)).not.toThrow()
   })
 
   it('bounds the exact-mode approval to live debt on a full repay (not maxUint256)', async () => {
@@ -373,6 +411,49 @@ describe('AaveBorrowProvider write layer', () => {
     expect(withdraw.functionName).toBe('withdrawETH')
   })
 
+  it('rejects maxUint256 withdraw calldata without max quote intent', async () => {
+    const provider = makeProvider({
+      collateral: 10n ** 18n,
+      debt: 1_000_000_000n,
+      allowance: maxUint256,
+    })
+    const quote = await provider.withdrawCollateral({
+      market,
+      walletAddress: WALLET,
+      amount: { amountRaw: 5n * 10n ** 17n },
+    })
+    const tx = quote.execution.transactions[0]
+    const decoded = decodeFunctionData({
+      abi: WETH_GATEWAY_ABI,
+      data: tx.data,
+    })
+    if (decoded.functionName !== 'withdrawETH') {
+      throw new Error('expected withdrawETH transaction')
+    }
+
+    expect(() =>
+      provider.validateQuoteExecution(
+        {
+          ...quote,
+          execution: {
+            ...quote.execution,
+            transactions: [
+              {
+                ...tx,
+                data: encodeFunctionData({
+                  abi: WETH_GATEWAY_ABI,
+                  functionName: 'withdrawETH',
+                  args: [decoded.args[0], maxUint256, decoded.args[2]],
+                }),
+              },
+            ],
+          },
+        },
+        WALLET,
+      ),
+    ).toThrow(QuoteCalldataMismatchError)
+  })
+
   it('rejects a native withdraw gateway approval for a non-aToken', async () => {
     const provider = makeProvider({
       collateral: 10n ** 18n,
@@ -430,6 +511,7 @@ describe('AaveBorrowProvider write layer', () => {
     })
     expect(withdraw.functionName).toBe('withdrawETH')
     expect(withdraw.args[1]).toBe(maxUint256)
+    expect(() => provider.validateQuoteExecution(quote, WALLET)).not.toThrow()
   })
 
   it('throws EmptyPositionError on max withdraw with zero collateral', async () => {

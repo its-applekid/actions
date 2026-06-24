@@ -43,13 +43,14 @@ const V4_EXACT_OUT_ACTIONS = '0x080c0f'
  * `V4_SWAP` command, the exact action sequence, and that the pool currencies
  * are the quoted assets, then trust the msg.sender settlement.
  * @param quote - Wallet-bound swap quote whose `execution.swapCalldata` is decoded.
+ * @returns The input amount the calldata is allowed to spend.
  * @throws QuoteCalldataMismatchError when the bytes are not a canonical V4 swap
  * of the quoted pair.
  */
 export function assertUniswapV4QuoteBound(
   quote: SwapQuote,
   expectedPool: ExpectedUniswapPool,
-): void {
+): bigint {
   const decoded = tryDecodeExecute(quote.execution.swapCalldata)
   if (!decoded) {
     throw new QuoteCalldataMismatchError({
@@ -96,7 +97,7 @@ export function assertUniswapV4QuoteBound(
   }
 
   const swapParams = decodeSwapParams(params[0], isExactIn)
-  assertUniswapQuoteFields(
+  return assertUniswapQuoteFields(
     quote,
     swapParams,
     isExactIn,

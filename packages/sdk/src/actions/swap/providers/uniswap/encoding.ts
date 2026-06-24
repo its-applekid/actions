@@ -267,9 +267,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenOut, minAmountOut]),
     ]
   } else {
-    const maxAmountIn =
-      quote.amountInRaw +
-      (quote.amountInRaw * BigInt(Math.round(slippage * 10000))) / 10000n
+    const maxAmountIn = computeMaxInput(quote.amountInRaw, slippage)
 
     actions =
       `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
@@ -312,6 +310,11 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
 function computeMinOutput(amountOutRaw: bigint, slippage: number): bigint {
   const slippageBps = BigInt(Math.round(slippage * 10_000))
   return (amountOutRaw * (10_000n - slippageBps)) / 10_000n
+}
+
+export function computeMaxInput(amountInRaw: bigint, slippage: number): bigint {
+  const slippageBps = BigInt(Math.round(slippage * 10_000))
+  return amountInRaw + (amountInRaw * slippageBps) / 10_000n
 }
 
 function calculatePrice(

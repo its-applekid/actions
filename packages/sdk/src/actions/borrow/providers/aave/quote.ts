@@ -149,6 +149,9 @@ export async function buildAaveRepayQuoteArgs(
     transactions: txs,
     approvalsSkipped,
     quoteAmounts: { borrowAmountRaw: repayAmount },
+    providerContext: aaveProviderContext({
+      borrowAmountIsMax: 'max' in params.amount,
+    }),
   })
 }
 
@@ -222,7 +225,10 @@ export async function buildAaveWithdrawCollateralQuoteArgs(
     // Native-ETH withdraws prepend a gateway aToken approval; direct ones don't.
     approvalsSkipped: withdraw.txs.length === 1,
     quoteAmounts: { collateralAmountRaw: amount },
-    providerContext: gatewayApprovalContext(withdraw.gatewayApprovalToken),
+    providerContext: aaveProviderContext({
+      collateralAmountIsMax: isMax,
+      gatewayApprovalToken: withdraw.gatewayApprovalToken,
+    }),
   })
 }
 
@@ -245,15 +251,18 @@ export async function buildAaveCloseQuoteArgs(
     approvalMode: params.approvalMode,
   })
   const txs = [...repay.txs]
+  const borrowAmountIsMax = 'max' in params.borrowAmount
 
   let collateralDelta = 0n
   let withdrawApprovalsSkipped = true
   let providerContext: Record<string, unknown> | undefined
+  let collateralAmountIsMax = false
   if (params.collateralAmount !== undefined) {
     const { amount: withdrawAmount, isMax } = resolveAaveAmount(
       params.collateralAmount,
       current.collateralAmount,
     )
+    collateralAmountIsMax = isMax
     // A max close with no collateral has nothing to withdraw; emitting a
     // withdraw-all leg would revert, so the repay proceeds on its own.
     if (!(isMax && current.collateralAmount === 0n)) {
@@ -269,7 +278,11 @@ export async function buildAaveCloseQuoteArgs(
       // Native-ETH withdraws prepend a gateway aToken approval.
       withdrawApprovalsSkipped = withdraw.txs.length === 1
       txs.push(...withdraw.txs)
-      providerContext = gatewayApprovalContext(withdraw.gatewayApprovalToken)
+      providerContext = aaveProviderContext({
+        borrowAmountIsMax,
+        collateralAmountIsMax,
+        gatewayApprovalToken: withdraw.gatewayApprovalToken,
+      })
     }
   }
 
@@ -279,7 +292,9 @@ export async function buildAaveCloseQuoteArgs(
     debtDelta: -repay.repayAmount,
     transactions: txs,
     approvalsSkipped: repay.approvalsSkipped && withdrawApprovalsSkipped,
-    providerContext,
+    providerContext:
+      providerContext ??
+      aaveProviderContext({ borrowAmountIsMax, collateralAmountIsMax }),
     quoteAmounts: {
       borrowAmountRaw: repay.repayAmount,
       collateralAmountRaw: collateralDelta < 0n ? -collateralDelta : undefined,
@@ -287,9 +302,15 @@ export async function buildAaveCloseQuoteArgs(
   })
 }
 
-function gatewayApprovalContext(
-  gatewayApprovalToken: Address | undefined,
-): Record<string, unknown> | undefined {
-  if (!gatewayApprovalToken) return undefined
-  return { aTokenAddress: gatewayApprovalToken }
+function aaveProviderContext(params: {
+  borrowAmountIsMax?: boolean
+  collateralAmountIsMax?: boolean
+  gatewayApprovalToken?: Address
+}): Record<string, unknown> | undefined {
+  const context: Record<string, unknown> = {}
+  if (params.borrowAmountIsMax) context.borrowAmountIsMax = true
+  if (params.collateralAmountIsMax) context.collateralAmountIsMax = true
+  if (params.gatewayApprovalToken)
+    context.aTokenAddress = params.gatewayApprovalToken
+  return Object.keys(context).length ? context : undefined
 }

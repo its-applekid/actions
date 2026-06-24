@@ -2,6 +2,7 @@ import type { Address, Hex } from 'viem'
 import { decodeAbiParameters, isAddressEqual, zeroAddress } from 'viem'
 
 import { CURRENCY_AMOUNT_PARAMS } from '@/actions/swap/providers/uniswap/abis.js'
+import { computeMaxInput } from '@/actions/swap/providers/uniswap/encoding.js'
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { SwapQuote } from '@/types/swap/index.js'
 import { getAssetAddress, isNativeAsset } from '@/utils/assets.js'
@@ -34,31 +35,18 @@ export function assertUniswapQuoteFields(
   settleParam: Hex,
   takeParam: Hex,
   expectedPool: ExpectedUniswapPool,
-): void {
+): bigint {
   const tokenIn = currencyAddress(quote.assetIn, quote.chainId)
   const tokenOut = currencyAddress(quote.assetOut, quote.chainId)
   assertPoolMatchesQuote(tokenIn, tokenOut, swapParams, expectedPool)
   const expectedInput = isExactIn
     ? quote.amountInRaw
-    : maxInputWithSlippage(quote)
+    : computeMaxInput(quote.amountInRaw, quote.slippage)
   assertSwapAmounts(quote, swapParams, isExactIn, expectedInput)
   assertCurrencyAmount('settle', settleParam, tokenIn, expectedInput)
   const expectedOutput = isExactIn ? quote.amountOutMinRaw : quote.amountOutRaw
   assertCurrencyAmount('take', takeParam, tokenOut, expectedOutput)
-}
-
-function currencyAddress(
-  asset: SwapQuote['assetIn'],
-  chainId: SwapQuote['chainId'],
-): Address {
-  return isNativeAsset(asset) ? zeroAddress : getAssetAddress(asset, chainId)
-}
-
-function maxInputWithSlippage(quote: SwapQuote): bigint {
-  return (
-    quote.amountInRaw +
-    (quote.amountInRaw * BigInt(Math.round(quote.slippage * 10_000))) / 10_000n
-  )
+  return expectedInput
 }
 
 function assertSwapAmounts(
@@ -133,6 +121,13 @@ function assertPoolMatchesQuote(
     received: String(swapParams.zeroForOne),
     detail: 'swap direction does not match the quoted input asset',
   })
+}
+
+function currencyAddress(
+  asset: SwapQuote['assetIn'],
+  chainId: SwapQuote['chainId'],
+): Address {
+  return isNativeAsset(asset) ? zeroAddress : getAssetAddress(asset, chainId)
 }
 
 function assertNumber(field: string, actual: number, expected: number): void {
