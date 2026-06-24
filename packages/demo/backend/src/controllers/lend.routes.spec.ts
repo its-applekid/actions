@@ -5,6 +5,8 @@ import { createApp } from '@/app.js'
 import { WalletNotFoundError } from '@/helpers/errors.js'
 import * as lendService from '@/services/lend.js'
 
+import { authHeaders } from './routeTestUtils.js'
+
 vi.mock('@/services/lend.js', () => ({
   getMarkets: vi.fn(),
   getMarket: vi.fn(),
@@ -27,13 +29,6 @@ vi.mock('@/middleware/actions.js', () => ({
 const MARKET = {
   address: '0x38f4f3B6533de0023b9DCd04b02F93d36ad1F9f9',
   chainId: 130,
-}
-
-function authHeaders() {
-  return {
-    Authorization: 'Bearer fake-access-token',
-    'privy-id-token': 'fake-id-token',
-  }
 }
 
 beforeEach(async () => {

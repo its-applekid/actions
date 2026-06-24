@@ -10,6 +10,8 @@ import { createApp } from '@/app.js'
 import { WalletNotFoundError } from '@/helpers/errors.js'
 import * as swapService from '@/services/swap.js'
 
+import { authHeaders } from './routeTestUtils.js'
+
 vi.mock('@/services/swap.js', () => ({
   getMarkets: vi.fn(),
   getQuote: vi.fn(),
@@ -31,13 +33,6 @@ vi.mock('@/middleware/actions.js', () => ({
 const TOKEN_IN = '0x1111111111111111111111111111111111111111'
 const TOKEN_OUT = '0x2222222222222222222222222222222222222222'
 const CHAIN_ID = 84532
-
-function authHeaders() {
-  return {
-    Authorization: 'Bearer fake-access-token',
-    'privy-id-token': 'fake-id-token',
-  }
-}
 
 function executeBody() {
   return JSON.stringify({
