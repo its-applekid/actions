@@ -114,8 +114,7 @@ function nativeExactInputCalldata(): Hex {
 
 describe('WalletSwapNamespace calldata-integrity binding', () => {
   it('rejects a quote whose routerAddress is not the resolved provider router', () => {
-    // provider='uniswap', but routerAddress points at a Velodrome router (F264):
-    // the user would approve a router they never intended.
+    // A Uniswap quote pointing at Velodrome would approve the wrong router.
     const namespace = new WalletSwapNamespace(
       { uniswap: uniswapProvider() },
       mockWallet(),

@@ -165,9 +165,7 @@ describe('assertUniswapV4QuoteBound', () => {
   })
 
   it('rejects calldata that reverses the swap direction (sells the wrong token)', () => {
-    // Real V4 calldata for WETH->USDC (same pool, opposite direction), but the
-    // quote metadata claims USDC->WETH. Sorted poolKey is identical; only
-    // zeroForOne differs, so the direction check is what rejects it.
+    // Same sorted pool, opposite direction: only zeroForOne can reject it.
     const reversed = encodeUniversalRouterSwap({
       amountInRaw: 1_000_000n,
       assetIn: MockWETHAsset,

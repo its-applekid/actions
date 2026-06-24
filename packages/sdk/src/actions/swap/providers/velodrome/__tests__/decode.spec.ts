@@ -179,8 +179,7 @@ describe('assertVelodromeQuoteBound', () => {
     })
 
     it('rejects universal calldata that bakes a literal (non-sentinel) recipient', () => {
-      // Hand-craft execute() with a V2_SWAP_EXACT_IN input whose recipient is
-      // ATTACKER instead of the msg.sender sentinel.
+      // Hand-craft execute() with ATTACKER instead of the msg.sender sentinel.
       const route = encodePacked(
         ['address', 'bool', 'address'],
         [
