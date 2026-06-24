@@ -67,6 +67,9 @@ const MockAaveETHMarket: LendMarketConfig = {
   lendProvider: 'aave',
 }
 
+const MockAaveWETHATokenAddress =
+  '0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7' as Address
+
 describe('AaveLendProvider', () => {
   let provider: AaveLendProvider
   let mockConfig: LendProviderConfig
@@ -437,6 +440,9 @@ describe('AaveLendProvider', () => {
 
       // Approval must grant the Pool (not an attacker) exactly the supply amount.
       const approval = tx.transactionData.approval!
+      expect(approval.to.toLowerCase()).toBe(
+        MockAaveUSDCAsset.address[CHAIN_ID]!.toLowerCase(),
+      )
       const approve = decodeFunctionData({ abi: erc20Abi, data: approval.data })
       expect(approve.functionName).toBe('approve')
       const [spender, allowance] = approve.args as readonly [Address, bigint]
@@ -500,10 +506,10 @@ describe('AaveLendProvider', () => {
 
     it('withdrawETH: decodes pool/amount, routes native ETH `to` the wallet, approves the gateway', async () => {
       vi.mocked(aaveSdk.getReserve).mockResolvedValue(createMockWETHReserve())
-      // Arbitrary non-zero aWETH address: only its presence matters (the gateway
-      // needs an aToken to pull), the test never asserts on this value.
+      // Arbitrary non-zero aWETH address: the gateway approval must target the
+      // aToken contract, not the underlying WETH market.
       vi.mocked(aaveSdk.getATokenAddress).mockResolvedValue(
-        '0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7',
+        MockAaveWETHATokenAddress,
       )
 
       const tx = await provider.closePosition({
@@ -530,13 +536,18 @@ describe('AaveLendProvider', () => {
       expect(to.toLowerCase()).toBe(wallet)
 
       // aWETH approval must be granted to the gateway, not the pool/an attacker.
+      const approval = tx.transactionData.approval!
+      expect(approval.to.toLowerCase()).toBe(
+        MockAaveWETHATokenAddress.toLowerCase(),
+      )
       const approve = decodeFunctionData({
         abi: erc20Abi,
-        data: tx.transactionData.approval!.data,
+        data: approval.data,
       })
       expect(approve.functionName).toBe('approve')
-      const [spender] = approve.args as readonly [Address, bigint]
+      const [spender, allowance] = approve.args as readonly [Address, bigint]
       expect(spender.toLowerCase()).toBe(gateway)
+      expect(allowance).toBe(10n ** 18n)
     })
   })
 

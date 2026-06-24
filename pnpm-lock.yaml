@@ -351,13 +351,13 @@ importers:
         specifier: 22.14.0
         version: 22.14.0
       '@uniswap/sdk-core':
-        specifier: 7.18.0
+        specifier: ^7.18.0
         version: 7.18.0
       '@uniswap/universal-router-sdk':
-        specifier: 5.8.0
+        specifier: ^5.8.0
         version: 5.8.0(bufferutil@4.0.9)(hardhat@2.28.6(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)
       '@uniswap/v4-sdk':
-        specifier: 2.2.3
+        specifier: ^2.2.3
         version: 2.2.3(bufferutil@4.0.9)(hardhat@2.28.6(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)
       dotenv:
         specifier: ^16.4.5

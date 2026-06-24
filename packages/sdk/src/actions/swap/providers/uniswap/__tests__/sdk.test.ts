@@ -148,12 +148,18 @@ describe('getQuote', () => {
     })
 
     const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
-    // currency0 should be the lower address
-    expect(
-      args.poolKey.currency0.toLowerCase() <
-        args.poolKey.currency1.toLowerCase(),
-    ).toBe(true)
+    expect(call).toEqual(
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            poolKey: expect.objectContaining({
+              currency0: USDC.address[CHAIN_ID],
+              currency1: WETH.address[CHAIN_ID],
+            }),
+          }),
+        ],
+      }),
+    )
   })
 
   it('uses address(0) for native ETH in pool key', async () => {
@@ -171,9 +177,17 @@ describe('getQuote', () => {
     })
 
     const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
-    // Native ETH should be address(0), sorted as currency0 (lowest possible address)
-    expect(args.poolKey.currency0).toBe(zeroAddress)
+    expect(call).toEqual(
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            poolKey: expect.objectContaining({
+              currency0: zeroAddress,
+            }),
+          }),
+        ],
+      }),
+    )
   })
 
   it('uses address(0) for native ETH as output', async () => {
@@ -191,9 +205,17 @@ describe('getQuote', () => {
     })
 
     const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
-    // Native ETH should be address(0) regardless of swap direction
-    expect(args.poolKey.currency0).toBe(zeroAddress)
+    expect(call).toEqual(
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            poolKey: expect.objectContaining({
+              currency0: zeroAddress,
+            }),
+          }),
+        ],
+      }),
+    )
   })
 })
 
@@ -645,6 +667,11 @@ describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
       bn(diffQuote.amountOutRaw),
     ])
 
+    const [commands, , deadline] = decodeExecute(ours)
+    expect(commands).toBe(
+      `0x${CommandType.V4_SWAP.toString(16).padStart(2, '0')}`,
+    )
+    expect(deadline).toBe(BigInt(DEADLINE))
     expect(v4SwapInputOf(ours)).toBe(planner.finalize())
 
     const [, params] = decodeAbiParameters(
@@ -703,6 +730,11 @@ describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
     ])
     planner.addAction(Actions.TAKE_ALL, [poolKey.currency1, bn(minOut)])
 
+    const [commands, , deadline] = decodeExecute(ours)
+    expect(commands).toBe(
+      `0x${CommandType.V4_SWAP.toString(16).padStart(2, '0')}`,
+    )
+    expect(deadline).toBe(BigInt(DEADLINE))
     expect(v4SwapInputOf(ours)).toBe(planner.finalize())
   })
 
