@@ -291,12 +291,7 @@ export function isEpipeError(err: unknown): boolean {
   )
 }
 
-// SDK error messages can embed attacker-controlled on-chain ENS text (e.g.
-// `EnsResolutionError`/`EnsRpcError` quote the offending name, which originates
-// from a reverse record an attacker controls). Rendered verbatim to a terminal
-// those bytes can carry ANSI/OSC escapes that rewrite the screen or window
-// title. Strip C0/C1 control bytes from the human-readable `error` line. The
-// JSON path is unaffected: `JSON.stringify` already escapes control characters.
+// Strip ENS-sourced control bytes from human-readable error output.
 const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g
 
 /**

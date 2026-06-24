@@ -132,11 +132,7 @@ describe('writeError', () => {
   })
 
   it('strips terminal control bytes from the text-mode error line', () => {
-    // SDK errors quote attacker-controlled on-chain ENS text in their message
-    // (e.g. EnsResolutionError on an address whose reverse record embeds an
-    // ANSI clear-screen + OSC title-rewrite). The human-readable error line
-    // must not pass those escapes through to the terminal. The --json path is
-    // covered separately: JSON.stringify escapes control characters.
+    // Human-readable SDK error output must strip ENS-sourced control bytes.
     setJsonMode(false)
     const malicious =
       'ENS name "evil\u001b[2J\u001b]0;pwned\u0007.eth" is invalid'

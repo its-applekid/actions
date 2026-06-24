@@ -68,9 +68,7 @@ describe('runEnsResolve', () => {
   })
 
   it('checks mainnet config before input shape (config wins over validation)', async () => {
-    // Both conditions are violated: mainnet absent AND input is not name-shaped.
-    // The mainnet guard must fire first so the caller learns it is unconfigured
-    // rather than chasing a validation error it cannot otherwise reach.
+    // Missing mainnet config must win before name-shape validation.
     mockEns(async () => VITALIK, [{ chainId: optimismSepolia.id }])
     try {
       await runEnsResolve('notaname')

@@ -159,12 +159,7 @@ function formatAddress(doc: Printers['address']): void {
   writeLine(doc.address)
 }
 
-// ENS names and profile text records are arbitrary on-chain strings set by
-// whoever owns the name. Rendered verbatim in a terminal they can carry ANSI /
-// OSC escape sequences that rewrite the screen, the window title, or inject
-// clickable phishing hyperlinks. Strip C0/C1 control bytes (keeping ordinary
-// printable text) before writing the human-readable output. The `--json` path
-// is unaffected: JSON.stringify already escapes control characters.
+// Strip C0/C1 controls from human-readable ENS output; JSON already escapes them.
 const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g
 
 function sanitizeEnsText(value: string): string {

@@ -73,8 +73,7 @@ describe('ENS text formatters', () => {
 
   it('strips terminal control bytes from on-chain ENS text records', () => {
     const lines = capture()
-    // A malicious profile record carrying an ANSI clear-screen escape and an
-    // OSC title-rewrite sequence wrapped around innocuous-looking text.
+    // Malicious profile text can wrap ANSI/OSC escapes around harmless text.
     const malicious = `${ESC}[2J${ESC}]0;pwned${BEL}evilplain`
     printOutput('ensInfo', { ...NULL_INFO, description: malicious })
     const out = lines.join('')
@@ -93,9 +92,7 @@ describe('ENS text formatters', () => {
   })
 
   it('strips control bytes from a forward-resolved name', () => {
-    // resolve echoes the name the caller passed (or the SDK normalized); it is
-    // still rendered through sanitizeEnsText so a control-byte-bearing name
-    // cannot inject escapes into the `name -> address` line.
+    // resolve output still sanitizes caller-supplied or normalized names.
     const lines = capture()
     printOutput('ensResolve', {
       name: `evil${ESC}[2J.eth` as `${string}.${string}`,

@@ -106,8 +106,7 @@ describe('ChainManager', () => {
     })
 
     it('should configure Ethereum mainnet, which the Superchain registry omits', () => {
-      // mainnet (chain 1) is a supported chain for ENS reads but is absent from
-      // @eth-optimism/viem/chains; the L1 fallback must let it be constructed.
+      // Mainnet ENS reads need the L1 fallback because viem/chains lacks chain 1.
       expect(chainById[mainnet.id]).toBeUndefined()
       const mgr = new ChainManager([
         { chainId: mainnet.id, rpcUrls: ['https://mainnet.example'] },
@@ -119,9 +118,7 @@ describe('ChainManager', () => {
 
   describe('getChain', () => {
     it('throws ChainNotSupportedError for an id unknown to both registries', () => {
-      // getChain previously returned chainById[id] typed as Chain but actually
-      // undefined for unknown ids, silently handing viem an undefined chain.
-      // It now throws the typed error so callers fail loudly.
+      // Unknown chain ids must throw instead of returning undefined as Chain.
       expect(() =>
         chainManager.getChain(99999 as unknown as SupportedChainId),
       ).toThrow(ChainNotSupportedError)
