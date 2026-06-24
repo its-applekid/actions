@@ -27,15 +27,6 @@ export class WalletProvider<
     public readonly smartWalletProvider: S,
   ) {}
 
-  private requireHostedWalletProvider(): H {
-    if (!this.hostedWalletProvider) {
-      throw new Error(
-        'Hosted wallet provider not configured. Please add hostedWalletConfig to ActionsConfig.wallet.',
-      )
-    }
-    return this.hostedWalletProvider
-  }
-
   /**
    * Create a new smart wallet
    * @description Creates a smart wallet and attempts to deploy it across all supported chains.
@@ -106,16 +97,9 @@ export class WalletProvider<
     } = params
 
     if (!walletAddressParam && !deploymentSigners) {
-      try {
-        throw new Error(
-          'Either walletAddress or deploymentSigners array must be provided to locate the smart wallet',
-        )
-      } catch (error) {
-        console.error(error)
-        throw new Error(
-          'Either walletAddress or deploymentSigners array must be provided to locate the smart wallet',
-        )
-      }
+      throw new Error(
+        'Either walletAddress or deploymentSigners array must be provided to locate the smart wallet',
+      )
     }
 
     await reconcileSignerAddress(signer)
@@ -132,5 +116,14 @@ export class WalletProvider<
       signer,
       signers,
     })
+  }
+
+  private requireHostedWalletProvider(): H {
+    if (!this.hostedWalletProvider) {
+      throw new Error(
+        'Hosted wallet provider not configured. Please add hostedWalletConfig to ActionsConfig.wallet.',
+      )
+    }
+    return this.hostedWalletProvider
   }
 }
