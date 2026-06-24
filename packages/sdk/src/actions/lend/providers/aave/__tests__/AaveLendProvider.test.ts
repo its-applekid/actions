@@ -400,11 +400,7 @@ describe('AaveLendProvider', () => {
     })
   })
 
-  // Independent decode-back oracle (F190): the bytes the user actually signs are
-  // decoded with the local Aave ABIs and every arg is asserted, especially the
-  // recipient-in-bytes fields (`onBehalfOf`, `to`) and the approval `spender`,
-  // which previously had zero coverage. These fail closed: routing aWETH or native
-  // ETH to the pool/an attacker instead of the wallet flips an assertion.
+  // Decode signed bytes with local Aave ABIs so recipient and spender drift fails closed.
   describe('signing-path calldata decode', () => {
     const CHAIN_ID = 8453
     const wallet = MockReceiverAddress.toLowerCase()
@@ -506,8 +502,7 @@ describe('AaveLendProvider', () => {
 
     it('withdrawETH: decodes pool/amount, routes native ETH `to` the wallet, approves the gateway', async () => {
       vi.mocked(aaveSdk.getReserve).mockResolvedValue(createMockWETHReserve())
-      // Arbitrary non-zero aWETH address: the gateway approval must target the
-      // aToken contract, not the underlying WETH market.
+      // Gateway approval must target the aToken contract, not underlying WETH.
       vi.mocked(aaveSdk.getATokenAddress).mockResolvedValue(
         MockAaveWETHATokenAddress,
       )

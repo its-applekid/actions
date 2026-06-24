@@ -290,15 +290,9 @@ describe('calculatePriceImpact', () => {
   })
 })
 
-// #318: pin the hand-rolled `sqrtPriceX96² / 2¹⁹²` mid-price math against the
-// Uniswap SDK's price utilities. We derive the mid-price quoted output via
-// `@uniswap/sdk-core`'s `Price` (the same ratio v3/v4 pools expose) and assert
-// our `calculatePriceImpact` reads ~0 impact at that SDK-derived output, and a
-// proportional impact when execution is worse, so the fixed-point math has an
-// external reference rather than asserting against itself.
+// #318: pin fixed-point mid-price math against Uniswap SDK price utilities.
 describe('calculatePriceImpact vs Uniswap SDK price reference (#318)', () => {
-  // Equal decimals means the sdk-core Price scalar is 1, so `.quote()` returns the
-  // raw mid-price output directly comparable to our integer math.
+  // Equal decimals make the SDK quote directly comparable to our integer math.
   const token0 = new Token(10, '0x1111111111111111111111111111111111111111', 18)
   const token1 = new Token(10, '0x2222222222222222222222222222222222222222', 18)
   const SQRT_PRICE = 5602302599546145575577086272208896n // ~70711² ≈ 5e9 ratio
@@ -512,20 +506,7 @@ describe('encodeUniversalRouterSwap', () => {
   })
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Uniswap-SDK differential oracle (F153, F180)
-//
-// The hand-rolled V4 encoder is anchored against the canonical Uniswap reference
-// encoders (`@uniswap/v4-sdk`, `@uniswap/universal-router-sdk`), dev-only deps,
-// never in the runtime closure. For the same intent we build the V4 swap input
-// with `V4Planner` and assert byte-equality against our `encodeUniversalRouterSwap`
-// output. The byte-equality is the independent anchor: it proves our action
-// ordering, tuple layout, currencies and amounts match the reference encoder. The
-// subsequent `decodeAbiParameters` calls (using our own vendored param tuples)
-// only extract already-anchored fields into readable assertions; they are not a
-// second oracle, since byte-equality would already have failed if our tuples were
-// wrong.
-// ─────────────────────────────────────────────────────────────────────────────
+// Anchor the hand-rolled V4 encoder against Uniswap's reference encoders.
 describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
   const diffQuote = {
     price: '0',
@@ -540,9 +521,7 @@ describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
   const SLIPPAGE = 0.005
   const DEADLINE = 1700000000
 
-  // `V4Planner` runs ethers v5's `defaultAbiCoder` internally, which wants a
-  // `BigNumber`, not a native `bigint`. `addAction`'s param type is `any[]`, so a
-  // bare `bigint` would not type-error but would mis-encode; convert explicitly.
+  // V4Planner uses ethers v5 ABI encoding, so convert bigint inputs explicitly.
   const bn = (v: bigint) => BigNumber.from(v.toString())
 
   /** Pull the decoded `execute(commands, inputs, deadline)` out of our calldata. */
@@ -738,15 +717,7 @@ describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
     expect(v4SwapInputOf(ours)).toBe(planner.finalize())
   })
 
-  // F046 / #444: our encoder cannot route output to a non-msg.sender recipient.
-  // V4 `TAKE_ALL` carries no recipient (output always goes to msg.sender) and the
-  // caller's `recipient` arg is dropped entirely. This is a characterization
-  // tripwire, not a contract assertion: it pins that the caller's address never
-  // appears in the signed bytes, so the day the encoder is fixed to honor
-  // `recipient` (or to throw), this test fails and forces the update instead of
-  // silently routing funds to msg.sender. (V4 `TAKE_ALL` has no recipient field
-  // to assert a non-sentinel value against, so the substring check is the
-  // strongest available oracle here.)
+  // #444: V4 TAKE_ALL has no recipient, so the caller recipient must not appear.
   it('drops the caller recipient (output is not routed to recipient != msg.sender)', () => {
     const recipient = '0x00000000000000000000000000000000DeaDBeef' as Address
     const calldata = encodeUniversalRouterSwap({

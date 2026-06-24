@@ -13,9 +13,7 @@ import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { LendProviderConfig } from '@/types/actions.js'
 
-// Mock only the network-bound reads. `MetaMorphoAction` is intentionally NOT
-// mocked: it encodes the bytes the user signs, so the decode-back oracle below
-// (`erc4626Abi`) must run against the real encoder, not a literal-hex stand-in.
+// Mock only network reads; keep MetaMorphoAction real for decode-back coverage.
 vi.mock('@morpho-org/blue-sdk-viem', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
   return {
@@ -312,11 +310,7 @@ describe('MorphoLendProvider', () => {
     })
   })
 
-  // Independent decode-back oracle (F189, F160): the deposit/withdraw bytes are
-  // produced by the real `MetaMorphoAction` and decoded with viem's `erc4626Abi`,
-  // a different ABI than the one that encoded them. A caret-dep regression that
-  // swapped withdraw's `receiver`/`owner`, or routed assets to an attacker, flips
-  // an assertion here instead of round-tripping cleanly.
+  // Decode real MetaMorphoAction bytes with erc4626Abi so receiver/owner drift fails closed.
   describe('signing-path calldata decode', () => {
     const vaultAddress = MockGauntletUSDCMarket.address
     const wallet = MockReceiverAddress.toLowerCase()

@@ -69,9 +69,7 @@ describe('encodeCLSwap', () => {
     expect(decoded[payerIsUserIdx]).toBe(true)
   })
 
-  // Recipient-field symmetry (F181): the CL universal-router path hard-codes the
-  // msg.sender sentinel and ignores the caller's `recipient`. Pin both facts so
-  // the F003/#444 sentinel behavior cannot drift unnoticed.
+  // Pin that CL universal-router swaps use the msg.sender sentinel, not recipient.
   it('encodes recipient = msg.sender sentinel and drops the caller recipient', () => {
     const data = encodeCLSwap({
       assetIn: MockUSDCAsset,

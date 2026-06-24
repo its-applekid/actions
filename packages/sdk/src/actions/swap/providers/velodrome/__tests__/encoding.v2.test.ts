@@ -230,12 +230,7 @@ describe('encodeSwap', () => {
       expect(decoded[payerIsUserIdx]).toBe(true)
     })
 
-    // Symmetry with the v2/leaf siblings that assert `args[3] === RECIPIENT`.
-    // The universal-router path hard-codes the msg.sender sentinel and silently
-    // drops the caller's `recipient`. Decode the recipient field and pin both
-    // facts so the F003/#444 sentinel behavior cannot drift unnoticed: the day
-    // the encoder is fixed to honor `recipient`, this test fails and forces an
-    // update rather than shipping a wrong-recipient swap green.
+    // Pin that universal-router swaps use the msg.sender sentinel, not recipient.
     it('encodes recipient = msg.sender sentinel and drops the caller recipient', () => {
       const data = encodeSwap({
         assetIn: MockUSDCAsset,
@@ -263,8 +258,7 @@ describe('encodeSwap', () => {
       expect(encodedRecipient.toLowerCase()).toBe(
         UNIVERSAL_ROUTER_MSG_SENDER.toLowerCase(),
       )
-      // The caller asked for RECIPIENT; the universal-router encoder routes to
-      // msg.sender instead. Output must not silently go to the caller's address.
+      // Output must not silently route to the caller's requested recipient.
       expect(encodedRecipient.toLowerCase()).not.toBe(RECIPIENT.toLowerCase())
     })
   })
