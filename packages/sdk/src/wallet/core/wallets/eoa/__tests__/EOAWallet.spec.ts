@@ -229,8 +229,7 @@ describe('EOAWallet', () => {
         .mockResolvedValueOnce(mockReceipt2.transactionHash)
         .mockResolvedValueOnce(mockReceipt3.transactionHash)
 
-      // sendBatch performs exactly one inclusion wait per transaction. One
-      // mock per tx.
+      // sendBatch performs exactly one inclusion wait per transaction.
       vi.mocked(mockPublicClient.waitForTransactionReceipt)
         .mockResolvedValueOnce(mockReceipt)
         .mockResolvedValueOnce(mockReceipt2)
@@ -287,8 +286,7 @@ describe('EOAWallet', () => {
         unichain.id,
       )
 
-      // The batch builds the wallet client once and resolves the public client
-      // once, rather than per-transaction.
+      // Batch setup resolves wallet and public clients once, not per transaction.
       expect(vi.mocked(createWalletClient).mock.calls.length).toBe(
         createWalletClientCalls + 1,
       )
@@ -373,9 +371,7 @@ describe('EOAWallet', () => {
     })
 
     it('waits for receipts in parallel', async () => {
-      // Each wait only resolves once all three have been issued. If the
-      // implementation awaited one receipt before requesting the next, the
-      // count would stall at 1 and this test would hang.
+      // If receipt waits block broadcasting, issued stalls at 1 and this hangs.
       let releaseAll!: () => void
       const allIssued = new Promise<void>((resolve) => {
         releaseAll = resolve
@@ -448,8 +444,7 @@ describe('EOAWallet', () => {
         ),
       ).rejects.toThrow('insufficient funds')
 
-      // Broadcast halts at the failing tx: the first two are attempted, the
-      // third is never sent.
+      // Broadcast halts at the failing tx, so the third is never sent.
       expect(mockWalletClient.sendTransaction).toHaveBeenCalledTimes(2)
     })
   })

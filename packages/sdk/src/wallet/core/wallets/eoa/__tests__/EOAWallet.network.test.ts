@@ -79,8 +79,7 @@ describe('EOAWallet.sendBatch (network fork)', () => {
 
     expect(receipts).toHaveLength(RECIPIENTS.length)
 
-    // Each receipt maps back to its input transaction in order, mined
-    // successfully.
+    // Each receipt maps to its input transaction in order and mined successfully.
     receipts.forEach((receipt: TransactionReceipt, i) => {
       expect(receipt.status).toBe('success')
       expect(receipt.to?.toLowerCase()).toBe(RECIPIENTS[i].toLowerCase())
@@ -90,8 +89,7 @@ describe('EOAWallet.sendBatch (network fork)', () => {
     const hashes = new Set(receipts.map((r) => r.transactionHash))
     expect(hashes.size).toBe(RECIPIENTS.length)
 
-    // Nonces are strictly sequential in submission order, proving the
-    // sequential-broadcast invariant held against a real RPC.
+    // Sequential nonces prove the broadcast invariant held against a real RPC.
     const publicClient = chainManager.getPublicClient(BASE_SEPOLIA_ID)
     const nonces = await Promise.all(
       receipts.map(async (r) => {
