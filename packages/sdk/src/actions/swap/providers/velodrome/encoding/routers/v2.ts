@@ -5,8 +5,11 @@ import {
   encodeAbiParameters,
   encodeFunctionData,
   encodePacked,
+  getAddress,
+  isAddress,
 } from 'viem'
 
+import { decodeQuoteCalldata } from '@/actions/swap/core/quoteIntegrity.js'
 import {
   LEAF_ROUTER_ABI,
   POOL_ABI,
@@ -181,6 +184,14 @@ export interface EncodeSwapParams {
   chainId: SupportedChainId
 }
 
+export interface VelodromeV2SwapSummary {
+  recipient: Address
+  tokenIn: Address
+  tokenOut: Address
+  stable?: boolean
+  factoryAddress?: Address
+}
+
 /**
  * Encode swap calldata for the appropriate router type.
  * @param params - Swap encoding parameters
@@ -230,6 +241,7 @@ function encodeUniversalV2Swap(
   params: EncodeSwapParams,
 ): Hex {
   assertNoNativeInput(params.assetIn, 'Velodrome universal router')
+  assertNoNativeOutput(params.assetOut, 'Velodrome universal router')
 
   const commands = encodePacked(['uint8'], [V2_SWAP_EXACT_IN])
   const routes = encodePacked(
@@ -300,11 +312,18 @@ export function decodeSwapRecipient(
   swapCalldata: Hex,
   routerType: VelodromeRouterType,
 ): Address {
+  return decodeSwapSummary(swapCalldata, routerType).recipient
+}
+
+export function decodeSwapSummary(
+  swapCalldata: Hex,
+  routerType: VelodromeRouterType,
+): VelodromeV2SwapSummary {
   if (routerType === 'universal') {
-    return decodeUniversalV2SwapRecipient(swapCalldata)
+    return decodeUniversalV2SwapSummary(swapCalldata)
   }
   if (routerType === 'v2' || routerType === 'leaf') {
-    return decodeRouterSwapRecipient(swapCalldata, routerType)
+    return decodeRouterSwapSummary(swapCalldata, routerType)
   }
   throw new InvalidParamsError({
     param: 'routerType',
@@ -320,22 +339,41 @@ export function decodeSwapRecipient(
  * @throws InvalidParamsError when calldata is not a single V2_SWAP_EXACT_IN command.
  */
 export function decodeUniversalV2SwapRecipient(swapCalldata: Hex): Address {
-  const { args } = decodeFunctionData({
-    abi: UNIVERSAL_ROUTER_ABI,
-    data: swapCalldata,
+  return decodeUniversalV2SwapSummary(swapCalldata).recipient
+}
+
+export function decodeUniversalV2SwapSummary(
+  swapCalldata: Hex,
+): VelodromeV2SwapSummary {
+  return decodeQuoteCalldata({
+    expected: 'single Velodrome universal V2_SWAP_EXACT_IN calldata',
+    decode: () => {
+      const { args } = decodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        data: swapCalldata,
+      })
+      const [commands, inputs] = args
+      assertSingleUniversalCommand(
+        commands,
+        V2_SWAP_EXACT_IN,
+        'Velodrome universal V2_SWAP_EXACT_IN calldata',
+      )
+      assertSingleUniversalInput(inputs)
+      const decoded = decodeAbiParameters(
+        V2_SWAP_EXACT_IN_INPUT_PARAMS,
+        inputs[0],
+      )
+      const [recipient, , , route, payerIsUser] = decoded
+      assertUniversalPayerIsUser(payerIsUser)
+      const parsedRoute = decodePackedV2Route(route)
+      return {
+        recipient,
+        tokenIn: parsedRoute.tokenIn,
+        tokenOut: parsedRoute.tokenOut,
+        stable: parsedRoute.stable,
+      }
+    },
   })
-  const commands = args[0]
-  const inputs = args[1]
-  assertSingleUniversalCommand(
-    commands,
-    V2_SWAP_EXACT_IN,
-    'Velodrome universal V2_SWAP_EXACT_IN calldata',
-  )
-  assertSingleUniversalInput(inputs)
-  const decoded = decodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, inputs[0])
-  const recipient = decoded[0]
-  assertUniversalPayerIsUser(decoded[4])
-  return recipient
 }
 
 /**
@@ -349,20 +387,39 @@ export function decodeRouterSwapRecipient(
   swapCalldata: Hex,
   routerType: Extract<VelodromeRouterType, 'v2' | 'leaf'>,
 ): Address {
+  return decodeRouterSwapSummary(swapCalldata, routerType).recipient
+}
+
+export function decodeRouterSwapSummary(
+  swapCalldata: Hex,
+  routerType: Extract<VelodromeRouterType, 'v2' | 'leaf'>,
+): VelodromeV2SwapSummary {
+  return decodeQuoteCalldata({
+    expected: 'Velodrome v2 or leaf router swap calldata',
+    decode: () => decodeRouterSwapSummaryInner(swapCalldata, routerType),
+  })
+}
+
+function decodeRouterSwapSummaryInner(
+  swapCalldata: Hex,
+  routerType: Extract<VelodromeRouterType, 'v2' | 'leaf'>,
+): VelodromeV2SwapSummary {
   const abi = routerType === 'leaf' ? LEAF_ROUTER_ABI : V2_ROUTER_ABI
   const { functionName, args } = decodeFunctionData({ abi, data: swapCalldata })
 
   if (functionName === 'swapExactETHForTokens') {
-    const [, , recipient] = args
-    return recipient
+    const [, routes, recipient] = args
+    const route = getSingleRoute(routes)
+    return routeSummary(route, recipient)
   }
 
   if (
     functionName === 'swapExactTokensForETH' ||
     functionName === 'swapExactTokensForTokens'
   ) {
-    const [, , , recipient] = args
-    return recipient
+    const [, , routes, recipient] = args
+    const route = getSingleRoute(routes)
+    return routeSummary(route, recipient)
   }
 
   throw new InvalidParamsError({
@@ -372,11 +429,93 @@ export function decodeRouterSwapRecipient(
   })
 }
 
+function routeSummary(
+  route: { from: Address; to: Address; stable: boolean; factory?: Address },
+  recipient: Address,
+): VelodromeV2SwapSummary {
+  return {
+    recipient,
+    tokenIn: route.from,
+    tokenOut: route.to,
+    stable: route.stable,
+    factoryAddress: route.factory,
+  }
+}
+
+function getSingleRoute(
+  routes: ReadonlyArray<{
+    from: Address
+    to: Address
+    stable: boolean
+    factory?: Address
+  }>,
+) {
+  const [route] = routes
+  if (!route || routes.length !== 1) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Velodrome router calldata with one route',
+      received: `${routes.length} routes`,
+    })
+  }
+  return route
+}
+
+function decodePackedV2Route(route: Hex): {
+  tokenIn: Address
+  tokenOut: Address
+  stable: boolean
+} {
+  const raw = route.slice(2)
+  if (raw.length !== 82) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Velodrome universal route bytes with one 41-byte hop',
+      received: `${raw.length / 2} bytes`,
+    })
+  }
+  const stableByte = raw.slice(40, 42)
+  if (stableByte !== '00' && stableByte !== '01') {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Velodrome universal route stable byte 0x00 or 0x01',
+      received: `0x${stableByte}`,
+    })
+  }
+  return {
+    tokenIn: getPackedAddress(raw, 0),
+    tokenOut: getPackedAddress(raw, 42),
+    stable: stableByte === '01',
+  }
+}
+
+function getPackedAddress(raw: string, offset: number): Address {
+  const address = `0x${raw.slice(offset, offset + 40)}`
+  if (!isAddress(address)) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'packed route address',
+      received: address,
+    })
+  }
+  return getAddress(address)
+}
+
 function assertNoNativeInput(assetIn: Asset, context: string): void {
   if (isNativeAsset(assetIn)) {
     throw new NativeAssetNotSupportedError({
       symbol: assetIn.metadata.symbol,
       context,
+    })
+  }
+}
+
+function assertNoNativeOutput(assetOut: Asset, context: string): void {
+  if (isNativeAsset(assetOut)) {
+    throw new NativeAssetNotSupportedError({
+      symbol: assetOut.metadata.symbol,
+      context,
+      operation: 'output',
     })
   }
 }

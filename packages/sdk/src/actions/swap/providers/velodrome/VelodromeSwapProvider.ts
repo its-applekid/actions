@@ -1,13 +1,23 @@
+import type { Address } from 'viem'
 import { formatUnits } from 'viem'
 
 import { expandMarkets, findMarket } from '@/actions/swap/core/markets.js'
+import {
+  assertQuoteCalldataRecipient,
+  assertQuoteExecutionAddress,
+  assertQuoteExecutionField,
+  assertQuoteExecutionValue,
+} from '@/actions/swap/core/quoteIntegrity.js'
 import { SwapProvider } from '@/actions/swap/core/SwapProvider.js'
 import {
   getChainConfig,
   getSupportedChainIds,
   getValidMarketConfigs,
 } from '@/actions/swap/providers/velodrome/config.js'
+import { resolveTokens } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
+import type { VelodromePoolSwapSummary } from '@/actions/swap/providers/velodrome/encoding/index.js'
 import {
+  decodePoolSwapSummary,
   encodePoolSwap,
   fetchPoolQuote,
 } from '@/actions/swap/providers/velodrome/encoding/index.js'
@@ -24,6 +34,7 @@ import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
   ExactOutputNotSupportedError,
   MarketNotAllowedError,
+  NativeAssetNotSupportedError,
 } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { SwapQuoteParamsResolved } from '@/services/nameservices/ens/types.js'
@@ -95,6 +106,40 @@ export class VelodromeSwapProvider extends SwapProvider<VelodromeSwapProviderCon
       recipient: params.walletAddress,
       approvalMode: params.approvalMode,
     })
+  }
+
+  protected override validateQuoteExecution(quote: SwapQuote): void {
+    const chain = getChainConfig(quote.chainId)
+    const poolConfig = this.resolveVelodromeMarketConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    this.validateNativeAssetSupport(
+      quote,
+      poolConfig,
+      chain.metadata.routerType,
+    )
+    assertQuoteExecutionAddress({
+      field: 'execution.routerAddress',
+      expected: chain.contracts.router,
+      received: quote.execution.routerAddress,
+    })
+    assertQuoteExecutionValue({
+      field: 'execution.value',
+      expected: isNativeAsset(quote.assetIn) ? quote.amountInRaw : 0n,
+      received: quote.execution.value,
+    })
+    const decoded = decodePoolSwapSummary(
+      quote.execution.swapCalldata,
+      poolConfig,
+      chain.metadata.routerType,
+    )
+    assertQuoteCalldataRecipient({
+      expectedRecipient: quote.recipient,
+      calldataRecipient: decoded.recipient,
+    })
+    this.validateDecodedQuoteRoute(quote, poolConfig, decoded)
   }
 
   /**
@@ -263,5 +308,101 @@ export class VelodromeSwapProvider extends SwapProvider<VelodromeSwapProviderCon
       })
     }
     return resolvePoolConfig(config)
+  }
+
+  private validateDecodedQuoteRoute(
+    quote: SwapQuote,
+    poolConfig: ReturnType<typeof resolvePoolConfig>,
+    decoded: VelodromePoolSwapSummary,
+  ): void {
+    const { tokenIn, tokenOut } = resolveTokens(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    if (poolConfig.type === 'cl') {
+      if (!('tickSpacing' in decoded)) {
+        assertQuoteExecutionField({
+          field: 'swapCalldata.poolType',
+          expected: 'cl',
+          received: 'v2',
+        })
+        return
+      }
+      this.validateDecodedTokens(decoded, tokenIn, tokenOut)
+      assertQuoteExecutionField({
+        field: 'swapCalldata.tickSpacing',
+        expected: poolConfig.tickSpacing,
+        received: decoded.tickSpacing,
+      })
+      return
+    }
+    if ('tickSpacing' in decoded) {
+      assertQuoteExecutionField({
+        field: 'swapCalldata.poolType',
+        expected: 'v2',
+        received: 'cl',
+      })
+      return
+    }
+    this.validateDecodedTokens(decoded, tokenIn, tokenOut)
+    assertQuoteExecutionField({
+      field: 'swapCalldata.stable',
+      expected: poolConfig.stable,
+      received: decoded.stable ?? false,
+    })
+    if (decoded.factoryAddress === undefined) return
+    const chain = getChainConfig(quote.chainId)
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.factoryAddress',
+      expected: chain.contracts.poolFactory,
+      received: decoded.factoryAddress,
+    })
+  }
+
+  private validateDecodedTokens(
+    decoded: { tokenIn: Address; tokenOut: Address },
+    tokenIn: Address,
+    tokenOut: Address,
+  ): void {
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.tokenIn',
+      expected: tokenIn,
+      received: decoded.tokenIn,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.tokenOut',
+      expected: tokenOut,
+      received: decoded.tokenOut,
+    })
+  }
+
+  private validateNativeAssetSupport(
+    quote: SwapQuote,
+    poolConfig: ReturnType<typeof resolvePoolConfig>,
+    routerType: ReturnType<typeof getChainConfig>['metadata']['routerType'],
+  ): void {
+    if (poolConfig.type === 'cl') {
+      this.throwIfNativeRoute(quote, 'Velodrome CL router')
+      return
+    }
+    if (routerType === 'universal') {
+      this.throwIfNativeRoute(quote, 'Velodrome universal router')
+    }
+  }
+
+  private throwIfNativeRoute(quote: SwapQuote, context: string): void {
+    if (isNativeAsset(quote.assetIn)) {
+      throw new NativeAssetNotSupportedError({
+        symbol: quote.assetIn.metadata.symbol,
+        context,
+      })
+    }
+    if (!isNativeAsset(quote.assetOut)) return
+    throw new NativeAssetNotSupportedError({
+      symbol: quote.assetOut.metadata.symbol,
+      context,
+      operation: 'output',
+    })
   }
 }

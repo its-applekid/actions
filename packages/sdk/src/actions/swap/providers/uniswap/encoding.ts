@@ -9,6 +9,7 @@ import {
   zeroAddress,
 } from 'viem'
 
+import { decodeQuoteCalldata } from '@/actions/swap/core/quoteIntegrity.js'
 import {
   CURRENCY_AMOUNT_PARAMS,
   EXACT_INPUT_SINGLE_PARAMS,
@@ -213,6 +214,17 @@ export interface EncodeSwapParams {
   tickSpacing: number
 }
 
+export interface UniversalRouterSwapSummary {
+  recipient: Address
+  currencyIn: Address
+  currencyOut: Address
+  settleCurrency: Address
+  takeCurrency: Address
+  fee: number
+  tickSpacing: number
+  hooks: Address
+}
+
 // V4 Universal Router command
 const V4_SWAP = 0x10
 
@@ -336,54 +348,94 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
  * @throws InvalidParamsError when calldata is not a single V4 swap ending in TAKE.
  */
 export function decodeUniversalRouterRecipient(swapCalldata: Hex): Address {
-  const { args } = decodeFunctionData({
-    abi: UNIVERSAL_ROUTER_ABI,
-    data: swapCalldata,
-  })
-  const commands = args[0] as Hex
-  const inputs = args[1] as readonly Hex[]
-  if (commands !== `0x${V4_SWAP.toString(16).padStart(2, '0')}`) {
-    throw new InvalidParamsError({
-      param: 'swapCalldata',
-      expected: 'Universal Router V4_SWAP command calldata',
-      received: commands,
-    })
-  }
-  if (inputs.length !== 1) {
-    throw new InvalidParamsError({
-      param: 'swapCalldata',
-      expected: 'Universal Router V4_SWAP calldata with one input payload',
-      received: `${inputs.length} input payloads`,
-    })
-  }
-  const [actions, actionParams] = decodeAbiParameters(
-    [{ type: 'bytes' }, { type: 'bytes[]' }],
-    inputs[0],
-  )
+  return decodeUniversalRouterSwapSummary(swapCalldata).recipient
+}
 
-  const actionBytes = (actions as Hex).slice(2)
+export function decodeUniversalRouterSwapSummary(
+  swapCalldata: Hex,
+): UniversalRouterSwapSummary {
+  return decodeQuoteCalldata({
+    expected: 'single Uniswap V4 Universal Router swap calldata',
+    decode: () => {
+      const { args } = decodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        data: swapCalldata,
+      })
+      const [commands, inputs] = args
+      if (commands !== `0x${V4_SWAP.toString(16).padStart(2, '0')}`) {
+        throw new InvalidParamsError({
+          param: 'swapCalldata',
+          expected: 'Universal Router V4_SWAP command calldata',
+          received: commands,
+        })
+      }
+      if (inputs.length !== 1) {
+        throw new InvalidParamsError({
+          param: 'swapCalldata',
+          expected: 'Universal Router V4_SWAP calldata with one input payload',
+          received: `${inputs.length} input payloads`,
+        })
+      }
+      const [actions, actionParams] = decodeAbiParameters(
+        [{ type: 'bytes' }, { type: 'bytes[]' }],
+        inputs[0],
+      )
+
+      const parsedActions = parseActionBytes(actions.slice(2))
+      validateV4Actions(actions, parsedActions)
+      if (actionParams.length !== parsedActions.length) {
+        throw new InvalidParamsError({
+          param: 'swapCalldata',
+          expected: 'one V4 params payload per action',
+          received: `${actionParams.length} params for ${parsedActions.length} actions`,
+        })
+      }
+
+      const [swapParams] =
+        parsedActions[0] === SWAP_EXACT_IN_SINGLE
+          ? decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, actionParams[0])
+          : decodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, actionParams[0])
+      const [settleCurrency] = decodeAbiParameters(
+        CURRENCY_AMOUNT_PARAMS,
+        actionParams[1],
+      )
+      const [takeCurrency, recipient] = decodeAbiParameters(
+        TAKE_PARAMS,
+        actionParams[2],
+      )
+      const currencyIn = swapParams.zeroForOne
+        ? swapParams.poolKey.currency0
+        : swapParams.poolKey.currency1
+      const currencyOut = swapParams.zeroForOne
+        ? swapParams.poolKey.currency1
+        : swapParams.poolKey.currency0
+
+      return {
+        recipient,
+        currencyIn,
+        currencyOut,
+        settleCurrency,
+        takeCurrency,
+        fee: swapParams.poolKey.fee,
+        tickSpacing: swapParams.poolKey.tickSpacing,
+        hooks: swapParams.poolKey.hooks,
+      }
+    },
+  })
+}
+
+function validateV4Actions(
+  actions: Hex,
+  parsedActions: readonly number[],
+): void {
   const exactInActions = [SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE]
   const exactOutActions = [SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE]
-  const parsedActions = parseActionBytes(actionBytes)
-  if (!actionsEqual(parsedActions, exactInActions, exactOutActions)) {
-    throw new InvalidParamsError({
-      param: 'swapCalldata',
-      expected: 'V4 exact-in or exact-out action list ending in TAKE',
-      received: actions as Hex,
-    })
-  }
-
-  const params = actionParams as readonly Hex[]
-  if (params.length !== parsedActions.length) {
-    throw new InvalidParamsError({
-      param: 'swapCalldata',
-      expected: 'one V4 params payload per action',
-      received: `${params.length} params for ${parsedActions.length} actions`,
-    })
-  }
-
-  const [, recipient] = decodeAbiParameters(TAKE_PARAMS, params[2])
-  return recipient
+  if (actionsEqual(parsedActions, exactInActions, exactOutActions)) return
+  throw new InvalidParamsError({
+    param: 'swapCalldata',
+    expected: 'V4 exact-in or exact-out action list ending in TAKE',
+    received: actions,
+  })
 }
 
 function parseActionBytes(actionBytes: string): number[] {

@@ -5,8 +5,11 @@ import {
   encodeAbiParameters,
   encodeFunctionData,
   encodePacked,
+  getAddress,
+  isAddress,
 } from 'viem'
 
+import { decodeQuoteCalldata } from '@/actions/swap/core/quoteIntegrity.js'
 import {
   CL_POOL_FACTORY_ABI,
   CL_QUOTER_ABI,
@@ -21,6 +24,7 @@ import {
 } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
+  InvalidParamsError,
   MarketNotAllowedError,
   NativeAssetNotSupportedError,
 } from '@/core/error/errors.js'
@@ -123,6 +127,13 @@ export interface EncodeCLSwapParams {
   chainId: SupportedChainId
 }
 
+export interface VelodromeCLSwapSummary {
+  recipient: Address
+  tokenIn: Address
+  tokenOut: Address
+  tickSpacing: number
+}
+
 /** Universal Router V3_SWAP_EXACT_IN command byte */
 const V3_SWAP_EXACT_IN = 0x00
 
@@ -151,6 +162,13 @@ export function encodeCLSwap(params: EncodeCLSwapParams): Hex {
     throw new NativeAssetNotSupportedError({
       symbol: params.assetIn.metadata.symbol,
       context: 'Velodrome CL router',
+    })
+  }
+  if (isNativeAsset(params.assetOut)) {
+    throw new NativeAssetNotSupportedError({
+      symbol: params.assetOut.metadata.symbol,
+      context: 'Velodrome CL router',
+      operation: 'output',
     })
   }
   const { tokenIn, tokenOut } = resolveTokens(
@@ -190,20 +208,68 @@ export function encodeCLSwap(params: EncodeCLSwapParams): Hex {
  * @throws InvalidParamsError when calldata is not a single V3_SWAP_EXACT_IN command.
  */
 export function decodeCLSwapRecipient(swapCalldata: Hex): Address {
-  const { args } = decodeFunctionData({
-    abi: UNIVERSAL_ROUTER_ABI,
-    data: swapCalldata,
+  return decodeCLSwapSummary(swapCalldata).recipient
+}
+
+export function decodeCLSwapSummary(swapCalldata: Hex): VelodromeCLSwapSummary {
+  return decodeQuoteCalldata({
+    expected: 'single Velodrome CL V3_SWAP_EXACT_IN calldata',
+    decode: () => {
+      const { args } = decodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        data: swapCalldata,
+      })
+      const [commands, inputs] = args
+      assertSingleUniversalCommand(
+        commands,
+        V3_SWAP_EXACT_IN,
+        'Velodrome CL V3_SWAP_EXACT_IN calldata',
+      )
+      assertSingleUniversalInput(inputs)
+      const decoded = decodeAbiParameters(
+        V3_SWAP_EXACT_IN_INPUT_PARAMS,
+        inputs[0],
+      )
+      const [recipient, , , path, payerIsUser] = decoded
+      assertUniversalPayerIsUser(payerIsUser)
+      return { recipient, ...decodeCLPath(path) }
+    },
   })
-  const commands = args[0]
-  const inputs = args[1]
-  assertSingleUniversalCommand(
-    commands,
-    V3_SWAP_EXACT_IN,
-    'Velodrome CL V3_SWAP_EXACT_IN calldata',
-  )
-  assertSingleUniversalInput(inputs)
-  const decoded = decodeAbiParameters(V3_SWAP_EXACT_IN_INPUT_PARAMS, inputs[0])
-  const recipient = decoded[0]
-  assertUniversalPayerIsUser(decoded[4])
-  return recipient
+}
+
+function decodeCLPath(path: Hex): {
+  tokenIn: Address
+  tokenOut: Address
+  tickSpacing: number
+} {
+  const raw = path.slice(2)
+  if (raw.length !== 86) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Velodrome CL path bytes with one 43-byte hop',
+      received: `${raw.length / 2} bytes`,
+    })
+  }
+  return {
+    tokenIn: getPathAddress(raw, 0),
+    tickSpacing: parseInt24(raw.slice(40, 46)),
+    tokenOut: getPathAddress(raw, 46),
+  }
+}
+
+function getPathAddress(raw: string, offset: number): Address {
+  const address = `0x${raw.slice(offset, offset + 40)}`
+  if (!isAddress(address)) {
+    throw new InvalidParamsError({
+      param: 'swapCalldata',
+      expected: 'Velodrome CL path address',
+      received: address,
+    })
+  }
+  return getAddress(address)
+}
+
+function parseInt24(hex: string): number {
+  const value = Number.parseInt(hex, 16)
+  return value >= 0x800000 ? value - 0x1000000 : value
 }

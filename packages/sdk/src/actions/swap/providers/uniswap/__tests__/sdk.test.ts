@@ -17,7 +17,10 @@ import {
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { InvalidParamsError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  InvalidRecipientError,
+} from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 
 const USDC: Asset = {
@@ -47,6 +50,8 @@ const TICK_SPACING = 2
 // Distinct, correctly-checksummed addresses for recipient-routing assertions.
 const RECIPIENT = '0x000000000000000000000000000000000000dEaD' as Address
 const OTHER_RECIPIENT = '0x1234567890123456789012345678901234567890' as Address
+const BAD_CHECKSUM_RECIPIENT =
+  '0x000000000000000000000000000000000000DeAd' as Address
 
 // Mock sqrtPriceX96 for a ~2000 USDC/WETH pool
 // sqrtPriceX96 = sqrt(price) * 2^96, where price = WETH/USDC adjusted for decimals
@@ -499,21 +504,48 @@ describe('V4 recipient honoring (F046)', () => {
       tickSpacing: TICK_SPACING,
     })
 
+  const decodeTakeRecipient = (calldata: `0x${string}`): Address => {
+    const { args } = decodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      data: calldata,
+    })
+    const [commands, inputs] = args
+    expect(commands).toBe('0x10')
+    const [actions, actionParams] = decodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      inputs[0]!,
+    )
+    expect(actions.endsWith('0e')).toBe(true)
+    const [, recipient] = decodeAbiParameters(
+      [
+        { name: 'currency', type: 'address' },
+        { name: 'recipient', type: 'address' },
+        { name: 'amount', type: 'uint256' },
+      ],
+      actionParams[2]!,
+    )
+    return recipient
+  }
+
   it('encodes the requested recipient in the V4 TAKE action (exact-in)', () => {
     const calldata = encode(RECIPIENT)
-    expect(decodeUniversalRouterRecipient(calldata)).toBe(RECIPIENT)
+    expect(decodeTakeRecipient(calldata)).toBe(RECIPIENT)
   })
 
   it('encodes the requested recipient in the V4 TAKE action (exact-out)', () => {
     const calldata = encode(RECIPIENT, true)
-    expect(decodeUniversalRouterRecipient(calldata)).toBe(RECIPIENT)
+    expect(decodeTakeRecipient(calldata)).toBe(RECIPIENT)
   })
 
   it('routes to a non-self recipient rather than dropping to msg.sender', () => {
     const calldata = encode(OTHER_RECIPIENT)
     // Decoding the bytes (not asserting against itself) recovers the exact
     // recipient, proving output is no longer silently sent to msg.sender.
-    expect(decodeUniversalRouterRecipient(calldata)).toBe(OTHER_RECIPIENT)
+    expect(decodeTakeRecipient(calldata)).toBe(OTHER_RECIPIENT)
+  })
+
+  it('rejects a malformed or mis-checksummed recipient before encoding', () => {
+    expect(() => encode(BAD_CHECKSUM_RECIPIENT)).toThrow(InvalidRecipientError)
   })
 
   it('rejects calldata that is not a single V4 swap command', () => {

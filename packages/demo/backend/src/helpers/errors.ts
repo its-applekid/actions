@@ -18,6 +18,7 @@ import {
   ProtocolContractsNotConfiguredError,
   ProviderNotConfiguredError,
   QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
@@ -178,6 +179,13 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
         status: 403,
         message:
           'Quote calldata recipient does not match the executing wallet.',
+      },
+    ],
+    [
+      QuoteExecutionMismatchError,
+      {
+        status: 403,
+        message: 'Quote execution data does not match the quote.',
       },
     ],
     [

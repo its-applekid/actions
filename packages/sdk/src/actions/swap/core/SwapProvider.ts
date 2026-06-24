@@ -427,6 +427,13 @@ export abstract class SwapProvider<
     }
   }
 
+  /**
+   * Validate provider-specific execution bytes before using a pre-built quote.
+   * Concrete providers override this to bind router target, value, recipient,
+   * route tokens, and pool metadata to the quote.
+   */
+  protected validateQuoteExecution(_quote: SwapQuote): void {}
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────────
@@ -434,6 +441,7 @@ export abstract class SwapProvider<
   private async executeFromQuote(quote: SwapQuote): Promise<SwapTransaction> {
     validateQuoteNotExpired(quote.expiresAt)
     validateNotZeroAddress(quote.execution.routerAddress, 'routerAddress')
+    this.validateQuoteExecution(quote)
     return this.buildSwapTransactions(quote)
   }
 

@@ -1,12 +1,19 @@
-import { formatUnits } from 'viem'
+import { formatUnits, zeroAddress } from 'viem'
 
 import { expandMarkets, findMarket } from '@/actions/swap/core/markets.js'
+import {
+  assertQuoteCalldataRecipient,
+  assertQuoteExecutionAddress,
+  assertQuoteExecutionField,
+  assertQuoteExecutionValue,
+} from '@/actions/swap/core/quoteIntegrity.js'
 import { SwapProvider } from '@/actions/swap/core/SwapProvider.js'
 import {
   getSupportedChainIds,
   getUniswapAddresses,
 } from '@/actions/swap/providers/uniswap/addresses.js'
 import {
+  decodeUniversalRouterSwapSummary,
   encodeUniversalRouterSwap,
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
@@ -34,7 +41,11 @@ import type {
   SwapTransaction,
 } from '@/types/swap/index.js'
 import { resolveApprovalMode } from '@/utils/approve.js'
-import { isNativeAsset, parseAssetAmount } from '@/utils/assets.js'
+import {
+  getAssetAddress,
+  isNativeAsset,
+  parseAssetAmount,
+} from '@/utils/assets.js'
 
 /**
  * Uniswap V4 swap provider using Universal Router and Permit2 approvals.
@@ -78,6 +89,33 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       recipient: params.walletAddress,
       approvalMode: params.approvalMode,
     })
+  }
+
+  protected override validateQuoteExecution(quote: SwapQuote): void {
+    const addresses = getUniswapAddresses(quote.chainId)
+    const market = this.resolveUniswapConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    const decoded = decodeUniversalRouterSwapSummary(
+      quote.execution.swapCalldata,
+    )
+    assertQuoteExecutionAddress({
+      field: 'execution.routerAddress',
+      expected: addresses.universalRouter,
+      received: quote.execution.routerAddress,
+    })
+    assertQuoteExecutionValue({
+      field: 'execution.value',
+      expected: isNativeAsset(quote.assetIn) ? quote.amountInRaw : 0n,
+      received: quote.execution.value,
+    })
+    assertQuoteCalldataRecipient({
+      expectedRecipient: quote.recipient,
+      calldataRecipient: decoded.recipient,
+    })
+    this.validateDecodedQuoteRoute(quote, market, decoded)
   }
 
   protected async _buildApprovals(quote: SwapQuote) {
@@ -170,7 +208,7 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       execution: {
         swapCalldata,
         routerAddress: addresses.universalRouter,
-        value: isNativeAsset(assetIn) ? (amountInRaw ?? 0n) : 0n,
+        value: isNativeAsset(assetIn) ? finalAmountInRaw : 0n,
         providerContext: {
           fee: marketConfig.fee,
           tickSpacing: marketConfig.tickSpacing,
@@ -236,5 +274,53 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       )
     }
     return config as UniswapMarketConfig & { fee: number; tickSpacing: number }
+  }
+
+  private validateDecodedQuoteRoute(
+    quote: SwapQuote,
+    market: UniswapMarketConfig & { fee: number; tickSpacing: number },
+    decoded: ReturnType<typeof decodeUniversalRouterSwapSummary>,
+  ): void {
+    const expectedIn = this.resolveV4Currency(quote.assetIn, quote.chainId)
+    const expectedOut = this.resolveV4Currency(quote.assetOut, quote.chainId)
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.currencyIn',
+      expected: expectedIn,
+      received: decoded.currencyIn,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.currencyOut',
+      expected: expectedOut,
+      received: decoded.currencyOut,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.settleCurrency',
+      expected: expectedIn,
+      received: decoded.settleCurrency,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.takeCurrency',
+      expected: expectedOut,
+      received: decoded.takeCurrency,
+    })
+    assertQuoteExecutionField({
+      field: 'swapCalldata.fee',
+      expected: market.fee,
+      received: decoded.fee,
+    })
+    assertQuoteExecutionField({
+      field: 'swapCalldata.tickSpacing',
+      expected: market.tickSpacing,
+      received: decoded.tickSpacing,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.hooks',
+      expected: zeroAddress,
+      received: decoded.hooks,
+    })
+  }
+
+  private resolveV4Currency(asset: Asset, chainId: SupportedChainId) {
+    return isNativeAsset(asset) ? zeroAddress : getAssetAddress(asset, chainId)
   }
 }

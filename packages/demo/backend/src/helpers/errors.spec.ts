@@ -18,6 +18,7 @@ import {
   ProtocolContractsNotConfiguredError,
   ProviderNotConfiguredError,
   QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
@@ -243,6 +244,21 @@ describe('mapSdkError', () => {
     ).toEqual({
       status: 403,
       message: 'Quote calldata recipient does not match the executing wallet.',
+    })
+  })
+
+  it('maps QuoteExecutionMismatchError to 403', () => {
+    expect(
+      mapSdkError(
+        new QuoteExecutionMismatchError({
+          field: 'execution.routerAddress',
+          expected: '0x0000000000000000000000000000000000000001',
+          received: '0x0000000000000000000000000000000000000002',
+        }),
+      ),
+    ).toEqual({
+      status: 403,
+      message: 'Quote execution data does not match the quote.',
     })
   })
 

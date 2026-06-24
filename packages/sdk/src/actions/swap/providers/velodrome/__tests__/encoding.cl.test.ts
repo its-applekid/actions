@@ -163,6 +163,21 @@ describe('encodeCLSwap', () => {
     ).toThrow(NativeAssetNotSupportedError)
   })
 
+  it('rejects native output because no UNWRAP_ETH command is emitted', () => {
+    expect(() =>
+      encodeCLSwap({
+        assetIn: MockUSDCAsset,
+        assetOut: MockETHAsset,
+        amountInRaw: 1000000n,
+        amountOutMin: 900000000000000000n,
+        tickSpacing: 100,
+        recipient: RECIPIENT,
+        deadline: DEADLINE,
+        chainId: BASE_CHAIN_ID,
+      }),
+    ).toThrow(NativeAssetNotSupportedError)
+  })
+
   it('produces different calldata than V2 universal router swap', () => {
     const clData = encodeCLSwap({
       assetIn: MockUSDCAsset,

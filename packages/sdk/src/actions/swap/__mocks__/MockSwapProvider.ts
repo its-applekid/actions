@@ -9,6 +9,8 @@ import { type MockedFunction, vi } from 'vitest'
 
 import { SwapProvider } from '@/actions/swap/core/SwapProvider.js'
 import {
+  CURRENCY_AMOUNT_PARAMS,
+  EXACT_INPUT_SINGLE_PARAMS,
   TAKE_PARAMS,
   UNIVERSAL_ROUTER_ABI as UNISWAP_UNIVERSAL_ROUTER_ABI,
 } from '@/actions/swap/providers/uniswap/abis.js'
@@ -243,9 +245,28 @@ export class MockSwapProvider extends SwapProvider<SwapProviderConfig> {
       recipient,
       0n,
     ])
+    const swapParams = encodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, [
+      {
+        poolKey: {
+          currency0: '0x0000000000000000000000000000000000000000',
+          currency1: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          fee: 500,
+          tickSpacing: 10,
+          hooks: '0x0000000000000000000000000000000000000000',
+        },
+        zeroForOne: false,
+        amountIn: 1n,
+        amountOutMinimum: 1n,
+        hookData: '0x',
+      },
+    ])
+    const settleParams = encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [
+      '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      1n,
+    ])
     const input = encodeAbiParameters(
       [{ type: 'bytes' }, { type: 'bytes[]' }],
-      ['0x060c0e', ['0x', '0x', takeParams]],
+      ['0x060c0e', [swapParams, settleParams, takeParams]],
     )
     return encodeFunctionData({
       abi: UNISWAP_UNIVERSAL_ROUTER_ABI,
@@ -258,11 +279,19 @@ export class MockSwapProvider extends SwapProvider<SwapProviderConfig> {
     recipient: Address,
     deadline: number,
   ): Hex {
+    const route = encodePacked(
+      ['address', 'bool', 'address'],
+      [
+        '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        false,
+        '0x4200000000000000000000000000000000000006',
+      ],
+    )
     const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
       recipient,
       1n,
       1n,
-      '0x',
+      route,
       true,
       false,
     ])

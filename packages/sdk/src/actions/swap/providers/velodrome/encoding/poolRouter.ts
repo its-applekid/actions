@@ -15,16 +15,28 @@ import type { SwapPrice } from '@/types/swap/index.js'
 
 import {
   decodeCLSwapRecipient,
+  decodeCLSwapSummary,
   encodeCLSwap,
   getCLQuote,
+  type VelodromeCLSwapSummary,
 } from './routers/cl.js'
-import { decodeSwapRecipient, encodeSwap, getQuote } from './routers/v2.js'
+import {
+  decodeSwapRecipient,
+  decodeSwapSummary,
+  encodeSwap,
+  getQuote,
+  type VelodromeV2SwapSummary,
+} from './routers/v2.js'
 
 /** Internal result from pool-type-specific quoting */
 export interface PoolQuoteResult {
   internalQuote: SwapPrice
   providerContext: Record<string, unknown>
 }
+
+export type VelodromePoolSwapSummary =
+  | VelodromeCLSwapSummary
+  | VelodromeV2SwapSummary
 
 /**
  * Fetch a price quote by routing to the correct pool type (v2 AMM or CL/Slipstream).
@@ -158,6 +170,17 @@ export function decodePoolSwapRecipient(
     param: 'providerContext',
     expected: 'Velodrome quote context with tickSpacing or routerType',
   })
+}
+
+export function decodePoolSwapSummary(
+  swapCalldata: Hex,
+  poolConfig: ResolvedPoolConfig,
+  routerType: VelodromeRouterType,
+): VelodromePoolSwapSummary {
+  if (poolConfig.type === 'cl') {
+    return decodeCLSwapSummary(swapCalldata)
+  }
+  return decodeSwapSummary(swapCalldata, routerType)
 }
 
 function isCLProviderContext(

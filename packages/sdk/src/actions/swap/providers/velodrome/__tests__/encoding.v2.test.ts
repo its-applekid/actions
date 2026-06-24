@@ -341,6 +341,23 @@ describe('encodeSwap', () => {
         }),
       ).toThrow(NativeAssetNotSupportedError)
     })
+
+    it('rejects native output because no UNWRAP_ETH command is emitted', () => {
+      expect(() =>
+        encodeSwap({
+          assetIn: MockUSDCAsset,
+          assetOut: MockETHAsset,
+          amountInRaw: 1000000n,
+          amountOutMin: 900000000000000000n,
+          routerType: 'universal',
+          stable: false,
+          factoryAddress: FACTORY,
+          recipient: RECIPIENT,
+          deadline: DEADLINE,
+          chainId: BASE_CHAIN_ID,
+        }),
+      ).toThrow(NativeAssetNotSupportedError)
+    })
   })
 
   describe('router type comparison', () => {

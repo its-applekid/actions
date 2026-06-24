@@ -1,10 +1,12 @@
 import type { Address } from 'viem'
-import { encodeAbiParameters, encodeFunctionData } from 'viem'
+import { encodeAbiParameters, encodeFunctionData, encodePacked } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createMockSwapProvider } from '@/actions/swap/__mocks__/MockSwapProvider.js'
 import { WalletSwapNamespace } from '@/actions/swap/namespaces/WalletSwapNamespace.js'
 import {
+  CURRENCY_AMOUNT_PARAMS,
+  EXACT_INPUT_SINGLE_PARAMS,
   TAKE_PARAMS,
   UNIVERSAL_ROUTER_ABI,
 } from '@/actions/swap/providers/uniswap/abis.js'
@@ -46,9 +48,28 @@ describe('WalletSwapNamespace', () => {
       recipient,
       0n,
     ])
+    const swapParams = encodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, [
+      {
+        poolKey: {
+          currency0: '0x0000000000000000000000000000000000000000',
+          currency1: USDC.address[84532],
+          fee: 500,
+          tickSpacing: 10,
+          hooks: '0x0000000000000000000000000000000000000000',
+        },
+        zeroForOne: false,
+        amountIn: 1n,
+        amountOutMinimum: 1n,
+        hookData: '0x',
+      },
+    ])
+    const settleParams = encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [
+      USDC.address[84532],
+      1n,
+    ])
     const input = encodeAbiParameters(
       [{ type: 'bytes' }, { type: 'bytes[]' }],
-      ['0x060c0e', ['0x', '0x', takeParams]],
+      ['0x060c0e', [swapParams, settleParams, takeParams]],
     )
     return encodeFunctionData({
       abi: UNIVERSAL_ROUTER_ABI,
@@ -61,11 +82,19 @@ describe('WalletSwapNamespace', () => {
     recipient: Address,
     payerIsUser: boolean,
   ): `0x${string}` {
+    const route = encodePacked(
+      ['address', 'bool', 'address'],
+      [
+        USDC.address[84532],
+        false,
+        '0x4200000000000000000000000000000000000006',
+      ],
+    )
     const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
       recipient,
       1n,
       1n,
-      '0x',
+      route,
       payerIsUser,
       false,
     ])
@@ -427,6 +456,35 @@ describe('WalletSwapNamespace', () => {
 
       await expect(namespace.execute(tamperedQuote)).rejects.toBeInstanceOf(
         InvalidParamsError,
+      )
+      expect(provider.mockBuildApprovals).not.toHaveBeenCalled()
+    })
+
+    it('throws when Velodrome metadata matches wallet but calldata routes elsewhere', async () => {
+      const provider = createMockSwapProvider(undefined, {
+        provider: 'velodrome',
+      })
+      const wallet = createMockWallet()
+      const namespace = new WalletSwapNamespace({ velodrome: provider }, wallet)
+      const attackerRecipient =
+        '0x2222222222222222222222222222222222222222' as Address
+
+      const quote = await namespace.getQuote({
+        assetIn: USDC,
+        assetOut: ETH,
+        amountIn: 100,
+        chainId: 84532 as SupportedChainId,
+      })
+      const tamperedQuote = {
+        ...quote,
+        execution: {
+          ...quote.execution,
+          swapCalldata: encodeVelodromeUniversalPayer(attackerRecipient, true),
+        },
+      }
+
+      await expect(namespace.execute(tamperedQuote)).rejects.toBeInstanceOf(
+        QuoteCalldataRecipientMismatchError,
       )
       expect(provider.mockBuildApprovals).not.toHaveBeenCalled()
     })

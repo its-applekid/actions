@@ -20,6 +20,7 @@ import {
   NativeAssetNotSupportedError,
   ProviderNotConfiguredError,
   QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
@@ -156,6 +157,20 @@ describe('ActionsError hierarchy', () => {
     expect(err.shortMessage).toContain('0xbbb')
   })
 
+  it('QuoteExecutionMismatchError', () => {
+    const err = new QuoteExecutionMismatchError({
+      field: 'execution.routerAddress',
+      expected: '0xaaa',
+      received: '0xbbb',
+    })
+    expect(err.name).toBe('QuoteExecutionMismatchError')
+    expect(err.field).toBe('execution.routerAddress')
+    expect(err.expected).toBe('0xaaa')
+    expect(err.received).toBe('0xbbb')
+    expect(err).toBeInstanceOf(ActionsError)
+    expect(err.shortMessage).toContain('execution.routerAddress')
+  })
+
   it('ExactOutputNotSupportedError', () => {
     const err = new ExactOutputNotSupportedError('Velodrome')
     expect(err.name).toBe('ExactOutputNotSupportedError')
@@ -224,8 +239,19 @@ describe('ActionsError hierarchy', () => {
     expect(err.name).toBe('NativeAssetNotSupportedError')
     expect(err.symbol).toBe('ETH')
     expect(err.context).toBe('Velodrome universal router')
+    expect(err.operation).toBe('input')
     expect(err).toBeInstanceOf(ActionsError)
     expect(err.shortMessage).toContain('ETH')
+  })
+
+  it('NativeAssetNotSupportedError with output operation', () => {
+    const err = new NativeAssetNotSupportedError({
+      symbol: 'ETH',
+      context: 'Velodrome CL router',
+      operation: 'output',
+    })
+    expect(err.operation).toBe('output')
+    expect(err.shortMessage).toContain('output')
   })
 
   it('MarketNotFoundError with poolId', () => {
@@ -275,6 +301,11 @@ describe('ActionsError hierarchy', () => {
       new QuoteCalldataRecipientMismatchError({
         calldataRecipient: '0xaaa',
         walletAddress: '0xbbb',
+      }),
+      new QuoteExecutionMismatchError({
+        field: 'field',
+        expected: 'expected',
+        received: 'received',
       }),
       new ExactOutputNotSupportedError('X'),
       new ZeroAddressError('label'),

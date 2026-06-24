@@ -303,28 +303,34 @@ export class NativeAssetAddressError extends ActionsError {
 }
 
 /**
- * Thrown when native-ETH input is requested on a router path that cannot
- * settle or wrap it. The Velodrome universal/CL encoders pull the input token
- * via `transferFrom` (`payerIsUser = true`) and emit no `WRAP_ETH`, so a
- * native-in swap would attach `msg.value` to a call expecting an ERC-20 pull
- * and revert. Fail closed at the encoder seam instead (F047).
+ * Thrown when native ETH is requested on a router path that cannot settle,
+ * wrap, or unwrap it. The Velodrome universal/CL encoders pull ERC-20 input
+ * via `transferFrom` and do not emit native ETH wrap/unwrap commands, so fail
+ * closed at the encoder seam instead.
  */
 export class NativeAssetNotSupportedError extends ActionsError {
   override name = 'NativeAssetNotSupportedError' as const
   symbol: string
   context: string
+  operation: 'input' | 'output'
 
-  constructor(params: { symbol: string; context: string }) {
+  constructor(params: {
+    symbol: string
+    context: string
+    operation?: 'input' | 'output'
+  }) {
+    const operation = params.operation ?? 'input'
     super(
-      `Native ${params.symbol} input is not supported on ${params.context}`,
+      `Native ${params.symbol} ${operation} is not supported on ${params.context}`,
       {
         metaMessages: [
-          'Use a wrapped-native (WETH) input, or route through a path that wraps ETH.',
+          `Use a wrapped-native (WETH) ${operation}, or route through a path that handles native ETH.`,
         ],
       },
     )
     this.symbol = params.symbol
     this.context = params.context
+    this.operation = operation
   }
 }
 
@@ -408,10 +414,35 @@ export class QuoteCalldataRecipientMismatchError extends ActionsError {
 
   constructor(params: { calldataRecipient: string; walletAddress: string }) {
     super(
-      `Quote calldata routes output to ${params.calldataRecipient}, not the executing wallet (${params.walletAddress}); re-quote so calldata is bound to this wallet`,
+      `Quote calldata routes output to ${params.calldataRecipient}, not the expected recipient (${params.walletAddress}); re-quote so calldata is bound to the expected recipient`,
     )
     this.calldataRecipient = params.calldataRecipient
     this.walletAddress = params.walletAddress
+  }
+}
+
+/**
+ * Thrown when pre-built quote execution data no longer matches provider-owned
+ * expectations for the quote metadata. This catches tampered router targets,
+ * native value, route tokens, pool params, or provider context before approval
+ * checks and signing.
+ */
+export class QuoteExecutionMismatchError extends ActionsError {
+  override name = 'QuoteExecutionMismatchError' as const
+  field: string
+  expected: string
+  received: string
+
+  constructor(params: { field: string; expected: string; received: string }) {
+    super(`Quote execution field ${params.field} does not match the quote`, {
+      metaMessages: [
+        `Expected: ${params.expected}`,
+        `Received: ${params.received}`,
+      ],
+    })
+    this.field = params.field
+    this.expected = params.expected
+    this.received = params.received
   }
 }
 

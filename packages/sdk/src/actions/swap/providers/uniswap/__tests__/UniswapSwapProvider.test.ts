@@ -7,6 +7,11 @@ import { decodeUniversalRouterRecipient } from '@/actions/swap/providers/uniswap
 import type { UniswapSwapProviderConfig } from '@/actions/swap/providers/uniswap/types.js'
 import { UniswapSwapProvider } from '@/actions/swap/providers/uniswap/UniswapSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import {
+  InvalidParamsError,
+  QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
+} from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { Asset } from '@/types/asset.js'
 
@@ -140,6 +145,97 @@ describe('UniswapSwapProvider', () => {
           args: [walletAddress, USDC.address[CHAIN_ID], expect.any(String)],
         }),
       )
+    })
+
+    it('rejects pre-built quotes whose calldata routes to a different recipient', async () => {
+      const provider = createProvider()
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const attackerRecipient =
+        '0x5555555555555555555555555555555555555555' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+      const attackerQuote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: attackerRecipient,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: {
+            ...quote.execution,
+            swapCalldata: attackerQuote.execution.swapCalldata,
+          },
+        }),
+      ).rejects.toBeInstanceOf(QuoteCalldataRecipientMismatchError)
+    })
+
+    it('rejects pre-built quotes whose calldata routes a different output token', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          {
+            assets: [USDC, OP, MockWETHAsset],
+            fee: 100,
+            tickSpacing: 2,
+            chainId: CHAIN_ID,
+          },
+        ],
+      })
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+      const wethQuote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: MockWETHAsset,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: {
+            ...quote.execution,
+            swapCalldata: wethQuote.execution.swapCalldata,
+          },
+        }),
+      ).rejects.toBeInstanceOf(QuoteExecutionMismatchError)
+    })
+
+    it('rejects malformed pre-built quote calldata with an SDK validation error', async () => {
+      const provider = createProvider()
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: { ...quote.execution, swapCalldata: '0x1234' as const },
+        }),
+      ).rejects.toBeInstanceOf(InvalidParamsError)
     })
 
     it('throws without fee/tickSpacing in market filter', async () => {
