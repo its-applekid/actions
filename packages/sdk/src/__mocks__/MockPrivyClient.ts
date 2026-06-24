@@ -1,9 +1,12 @@
 import type { AuthorizationContext, PrivyClient } from '@privy-io/node'
-import type { Address, LocalAccount } from 'viem'
-import { getAddress } from 'viem'
+import type { Address } from 'viem'
 import { generatePrivateKey } from 'viem/accounts'
 
-import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createMockSigningKeyRegistry,
+  type MockSigningKeyRegistry,
+} from '@/__mocks__/MockSigningKeyRegistry.js'
+import { getRandomAddress } from '@/__mocks__/utils.js'
 
 /**
  * Mock Privy Client for testing
@@ -43,6 +46,25 @@ export function createMockPrivyWallet(params?: {
   }
 }
 
+/**
+ * Create a Privy wallet whose reported address matches its signing key.
+ * @param registry - Mock key registry used by the Privy account factory.
+ * @param id - Mock Privy wallet ID.
+ * @returns Mock Privy wallet metadata.
+ */
+export function createMatchedPrivyWallet(
+  registry: Pick<MockSigningKeyRegistry, 'addressFor'>,
+  id = 'mock-wallet-1',
+): {
+  id: string
+  address: Address
+} {
+  return createMockPrivyWallet({
+    id,
+    address: registry.addressFor(id),
+  })
+}
+
 export function getMockAuthorizationContext(
   privateKey?: string,
 ): AuthorizationContext {
@@ -58,25 +80,15 @@ export function getMockAuthorizationContext(
  * pair pointing at a different wallet's address is detectably divergent, which
  * is exactly the misconfiguration the reconciliation seam guards against.
  */
-export function createPrivyKeyRegistry() {
-  const keysByWalletId = new Map<string, LocalAccount>()
-  const keyFor = (walletId: string): LocalAccount => {
-    const existing = keysByWalletId.get(walletId)
-    if (existing) return existing
-    const key = createSigningAccount()
-    keysByWalletId.set(walletId, key)
-    return key
-  }
+export function createPrivyKeyRegistry(): MockSigningKeyRegistry {
+  const registry = createMockSigningKeyRegistry()
   return {
     /** Address the given walletId's signing key actually controls. */
-    addressFor: (walletId: string): Address => keyFor(walletId).address,
+    addressFor: registry.addressFor,
     /**
      * Account that signs with `walletId`'s key but reports `reportedAddress`,
      * mirroring `createViemAccount(client, { walletId, address })`.
      */
-    accountFor: (walletId: string, reportedAddress: Address): LocalAccount => ({
-      ...keyFor(walletId),
-      address: getAddress(reportedAddress),
-    }),
+    accountFor: registry.accountFor,
   }
 }

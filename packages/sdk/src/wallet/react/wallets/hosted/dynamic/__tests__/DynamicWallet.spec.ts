@@ -14,7 +14,7 @@ import {
 } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
-import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/providers/hosted/types/index.js'
+import { createMockDynamicWallet } from '@/wallet/react/wallets/hosted/dynamic/__mocks__/DynamicWalletTestUtils.js'
 import { DynamicWallet } from '@/wallet/react/wallets/hosted/dynamic/DynamicWallet.js'
 
 vi.mock('viem', async () => {
@@ -32,52 +32,6 @@ vi.mock('@dynamic-labs/ethereum', () => ({
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
-
-interface MockDynamicWalletOptions {
-  walletClientAccount?: Viem.LocalAccount
-  rawSigningAccount?: Viem.LocalAccount
-}
-
-function normalizeRawHash(message: string): Viem.Hex {
-  const hash = message.startsWith('0x') ? message : `0x${message}`
-  if (!Viem.isHex(hash)) throw new Error('Expected Dynamic raw message hash')
-  return hash
-}
-
-function signRawHash(
-  account: Viem.LocalAccount,
-  hash: Viem.Hex,
-): Promise<Viem.Hex> {
-  if (!account.sign) {
-    throw new Error('Mock Dynamic account does not support raw hash signing')
-  }
-  return account.sign({ hash })
-}
-
-function createMockDynamicWallet({
-  walletClientAccount = createSigningAccount(),
-  rawSigningAccount = walletClientAccount,
-}: MockDynamicWalletOptions = {}): DynamicHostedWalletToActionsWalletOptions['wallet'] & {
-  __mock: { connector: { signRawMessage: ReturnType<typeof vi.fn> } }
-} {
-  const mockConnector = {
-    signRawMessage: vi.fn(
-      ({ message }: { accountAddress: Viem.Address; message: string }) =>
-        signRawHash(rawSigningAccount, normalizeRawHash(message)),
-    ),
-  }
-  const mockWalletClient = {
-    account: { address: walletClientAccount.address },
-    signMessage: walletClientAccount.signMessage,
-    signTransaction: walletClientAccount.signTransaction,
-    signTypedData: walletClientAccount.signTypedData,
-  } as unknown as Viem.WalletClient
-  return {
-    connector: mockConnector,
-    getWalletClient: vi.fn().mockResolvedValue(mockWalletClient),
-    __mock: { connector: mockConnector },
-  } as never
-}
 
 describe('DynamicWallet', () => {
   beforeEach(() => {

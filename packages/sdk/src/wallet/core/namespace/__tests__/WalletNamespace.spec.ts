@@ -7,8 +7,8 @@ import { unichain } from 'viem/chains'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  createMatchedPrivyWallet,
   createMockPrivyClient,
-  createMockPrivyWallet,
   createPrivyKeyRegistry,
   getMockAuthorizationContext,
 } from '@/__mocks__/MockPrivyClient.js'
@@ -148,7 +148,7 @@ describe('WalletNamespace', () => {
       })
 
       // Create a hosted wallet to use as signer
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -196,7 +196,7 @@ describe('WalletNamespace', () => {
       })
 
       // Create a hosted wallet to use as signer
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -288,7 +288,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -337,7 +337,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -381,7 +381,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const hostedWallet =
         await walletProvider.hostedWalletProvider!.toActionsWallet({
           walletId: privyWallet.id,
@@ -595,7 +595,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const params = {
         walletId: privyWallet.id,
         address: getAddress(privyWallet.address),
@@ -632,7 +632,7 @@ describe('WalletNamespace', () => {
         supportedAssets: [],
       })
 
-      const privyWallet = createMatchedPrivyWallet()
+      const privyWallet = createMatchedPrivyWallet(privyKeys)
       const signer = await walletNamespace.createSigner({
         walletId: privyWallet.id,
         address: getAddress(privyWallet.address),
@@ -651,10 +651,3 @@ describe('WalletNamespace', () => {
     })
   })
 })
-
-function createMatchedPrivyWallet(id = 'mock-wallet-1') {
-  return createMockPrivyWallet({
-    id,
-    address: privyKeys.addressFor(id),
-  })
-}

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createMockTurnkeyClient,
   createTurnkeyKeyRegistry,
+  createTurnkeyWalletOptions,
 } from '@/__mocks__/MockTurnkeyClient.js'
 import {
   InvalidParamsError,
@@ -35,21 +36,6 @@ const client = createMockTurnkeyClient() as TurnkeyHttpClient
 // Resolves signWith -> real signing key, reporting ethereumAddress when given.
 const turnkeyKeys = createTurnkeyKeyRegistry()
 
-function createTurnkeyWallet(params: {
-  signWith: string
-  ethereumAddress?: string
-}) {
-  return TurnkeyWallet.create({
-    client,
-    organizationId: 'org_123',
-    signWith: params.signWith,
-    ethereumAddress: params.ethereumAddress,
-    chainManager: mockChainManager,
-    actionProviders: {},
-    actionSettings: {},
-  })
-}
-
 describe('TurnkeyWallet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -67,7 +53,9 @@ describe('TurnkeyWallet', () => {
     const signWith = 'key_abc'
     const expectedAddress = turnkeyKeys.addressFor(signWith)
 
-    const wallet = await createTurnkeyWallet({ signWith })
+    const wallet = await TurnkeyWallet.create(
+      createTurnkeyWalletOptions(client, mockChainManager, { signWith }),
+    )
 
     expect(wallet.address).toBe(expectedAddress)
     expect(wallet.signer.address).toBe(expectedAddress)
@@ -82,7 +70,12 @@ describe('TurnkeyWallet', () => {
     const signWith = 'key_with_eth'
     const ethereumAddress = turnkeyKeys.addressFor(signWith)
 
-    const wallet = await createTurnkeyWallet({ signWith, ethereumAddress })
+    const wallet = await TurnkeyWallet.create(
+      createTurnkeyWalletOptions(client, mockChainManager, {
+        signWith,
+        ethereumAddress,
+      }),
+    )
 
     expect(wallet.address).toBe(ethereumAddress)
     expect(vi.mocked(createAccount).mock.calls[0][0].ethereumAddress).toBe(
@@ -95,26 +88,32 @@ describe('TurnkeyWallet', () => {
     const wrongAddress = turnkeyKeys.addressFor('key_y')
 
     await expect(
-      createTurnkeyWallet({
-        signWith,
-        ethereumAddress: wrongAddress,
-      }),
+      TurnkeyWallet.create(
+        createTurnkeyWalletOptions(client, mockChainManager, {
+          signWith,
+          ethereumAddress: wrongAddress,
+        }),
+      ),
     ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('throws at construction on a malformed ethereumAddress', async () => {
     await expect(
-      createTurnkeyWallet({
-        signWith: 'key_x',
-        ethereumAddress: '0x123',
-      }),
+      TurnkeyWallet.create(
+        createTurnkeyWalletOptions(client, mockChainManager, {
+          signWith: 'key_x',
+          ethereumAddress: '0x123',
+        }),
+      ),
     ).rejects.toBeInstanceOf(InvalidParamsError)
   })
 
   it('should create a wallet client with correct configuration', async () => {
     const signWith = 'key_client'
     const expectedAddress = turnkeyKeys.addressFor(signWith)
-    const wallet = await createTurnkeyWallet({ signWith })
+    const wallet = await TurnkeyWallet.create(
+      createTurnkeyWalletOptions(client, mockChainManager, { signWith }),
+    )
 
     const mockWalletClient = {
       account: wallet.signer,
