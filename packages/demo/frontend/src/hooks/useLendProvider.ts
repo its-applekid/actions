@@ -176,11 +176,7 @@ export function useLendProvider({
 
   const refreshAllPositions = useCallback(async () => {
     if (!ready || markets.length === 0) return
-    // One SDK call aggregates every market/provider position (see #14),
-    // replacing the per-market getPosition fan-out. Kept best-effort: the
-    // event-driven caller invokes this as `void`, so a refresh failure must
-    // log rather than surface as an unhandled rejection (the old per-market
-    // fan-out swallowed errors the same way).
+    // Keep event-driven aggregate refresh best-effort because callers invoke it as void.
     try {
       const positions = await operations.getPositions()
       seedPositionCache(queryClient, positions)
@@ -213,9 +209,7 @@ export function useLendProvider({
         const marketInfoList = rawMarkets.map(convertLendMarketToMarketInfo)
         setMarkets(marketInfoList)
 
-        // One SDK call aggregates every market/provider position (see #14),
-        // replacing the per-market getPosition fan-out. The single activity-log
-        // entry is now honest: one call, one log line.
+        // One aggregate positions call maps to one honest activity-log entry.
         const positionActivity = logActivity('getPosition')
         const positions = await operations.getPositions()
         positionActivity?.confirm()

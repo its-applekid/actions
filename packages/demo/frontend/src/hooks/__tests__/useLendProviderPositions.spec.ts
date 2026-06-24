@@ -14,8 +14,7 @@ import type { Address } from 'viem'
 import type { TokenBalance } from '@eth-optimism/actions-sdk/react'
 
 const CHAIN_ID = 84532 as SupportedChainId
-// Market addresses are stored mixed-case; positions come back lowercased to
-// prove the join is case-insensitive (findPosition lowercases both sides).
+// Mixed-case markets and lowercased positions prove the join is case-insensitive.
 const FUNDED_MARKET = '0xAbCdef0123456789abCDEF0123456789ABCDef01' as Address
 const EMPTY_MARKET = '0x1111111111111111111111111111111111111111' as Address
 const ASSET_ADDRESS = '0x3333333333333333333333333333333333333333' as Address
@@ -75,9 +74,7 @@ function createOperations(positions: LendMarketPosition[]): EarnOperations {
         market(FUNDED_MARKET, 'Morpho'),
         market(EMPTY_MARKET, 'Aave'),
       ]),
-    // getPosition (single-market, used by the selected-market sync effect)
-    // must agree with getPositions, or the sync effect would drop the funded
-    // market. Resolve from the same positions array by marketId.
+    // Single-market reads must agree with aggregated positions by marketId.
     getPosition: vi.fn().mockImplementation(async (marketId) => {
       const match = positions.find(
         (p) =>
