@@ -213,6 +213,23 @@ describe('encodeSwap', () => {
       expect(args[2][0].stable).toBe(true)
       expect(decodeRouterSwapRecipient(data, 'leaf')).toBe(RECIPIENT)
     })
+
+    it('rejects a malformed recipient before leaf router encoding', () => {
+      expect(() =>
+        encodeSwap({
+          assetIn: MockUSDCAsset,
+          assetOut: MockWETHAsset,
+          amountInRaw: 1000000n,
+          amountOutMin: 400000000000000000n,
+          routerType: 'leaf',
+          stable: false,
+          factoryAddress: FACTORY,
+          recipient: '0x1234' as Address,
+          deadline: DEADLINE,
+          chainId: OP_CHAIN_ID,
+        }),
+      ).toThrow(InvalidRecipientError)
+    })
   })
 
   describe('universal router', () => {
