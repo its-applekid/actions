@@ -1,6 +1,7 @@
 import type { Hex } from 'viem'
 import { decodeFunctionData } from 'viem'
 
+import { assertSwapDeadlineField } from '@/actions/swap/core/calldataValidation.js'
 import {
   LEAF_ROUTER_ABI,
   UNIVERSAL_ROUTER_ABI,
@@ -89,7 +90,7 @@ function assertUniversalSwapMatchesQuote(
   expectedPool: ResolvedPoolConfig,
 ): void {
   assertUniversalShape(decoded)
-  assertDeadline(quote, decoded.deadline)
+  assertSwapDeadlineField(quote, decoded.deadline)
   assertUniversalSwapFields(
     quote,
     decoded.commands,
@@ -171,14 +172,4 @@ function isRouterSwapCall(
     }
   }
   return false
-}
-
-function assertDeadline(quote: SwapQuote, actual: bigint): void {
-  const expected = BigInt(quote.deadline)
-  if (actual === expected) return
-  throw new QuoteCalldataMismatchError({
-    field: 'deadline',
-    expected: expected.toString(),
-    received: actual.toString(),
-  })
 }

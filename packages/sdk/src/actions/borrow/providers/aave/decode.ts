@@ -4,7 +4,10 @@ import {
   assertAddressField,
   assertAmountField,
   assertBorrowAction,
+  assertCountField,
+  emptyOperationSummary,
   failCalldata,
+  quoteHasCollateral,
 } from '@/actions/borrow/core/calldataValidation.js'
 import { isAaveApprovalCall } from '@/actions/borrow/providers/aave/decodeApproval.js'
 import { POOL_ABI, WETH_GATEWAY_ABI } from '@/actions/shared/aave/abis/pool.js'
@@ -38,7 +41,7 @@ export function assertAaveQuoteExecution(
   market: AaveBorrowMarketConfig,
   walletAddress: Address,
 ): void {
-  const summary = emptySummary()
+  const summary = emptyOperationSummary(AAVE_OPERATIONS)
   for (const transaction of quote.execution.transactions) {
     const kind = classifyAaveTransaction(
       transaction,
@@ -236,7 +239,7 @@ function assertAaveBundleShape(
 ): void {
   const expected = expectedAaveSummary(quote, market)
   for (const operation of AAVE_OPERATIONS) {
-    assertCount(
+    assertCountField(
       `transaction.${operation}`,
       actual[operation],
       expected[operation],
@@ -248,11 +251,10 @@ function expectedAaveSummary(
   quote: BorrowQuote,
   market: AaveBorrowMarketConfig,
 ): AaveSummary {
-  const expected = emptySummary()
-  const hasCollateral = (quote.collateralAmountRaw ?? 0n) > 0n
+  const expected = emptyOperationSummary(AAVE_OPERATIONS)
   if (quote.action === 'open') {
     expected.borrow = 1
-    if (hasCollateral) expected[depositOperation(market)] = 1
+    if (quoteHasCollateral(quote)) expected[depositOperation(market)] = 1
   } else if (quote.action === 'depositCollateral') {
     expected[depositOperation(market)] = 1
   } else if (quote.action === 'withdrawCollateral') {
@@ -261,20 +263,9 @@ function expectedAaveSummary(
     expected.repay = 1
   } else {
     expected.repay = 1
-    if (hasCollateral) expected[withdrawOperation(market)] = 1
+    if (quoteHasCollateral(quote)) expected[withdrawOperation(market)] = 1
   }
   return expected
-}
-
-function emptySummary(): AaveSummary {
-  return {
-    borrow: 0,
-    repay: 0,
-    supply: 0,
-    withdraw: 0,
-    depositETH: 0,
-    withdrawETH: 0,
-  }
 }
 
 function depositOperation(market: AaveBorrowMarketConfig): AaveOperation {
@@ -283,14 +274,6 @@ function depositOperation(market: AaveBorrowMarketConfig): AaveOperation {
 
 function withdrawOperation(market: AaveBorrowMarketConfig): AaveOperation {
   return market.aave.collateralUsesWethGateway ? 'withdrawETH' : 'withdraw'
-}
-
-function assertCount(field: string, actual: number, expected: number): void {
-  if (actual === expected) return
-  failCalldata(field, {
-    expected: String(expected),
-    received: String(actual),
-  })
 }
 
 function assertTarget(transaction: TransactionData, expected: Address): void {

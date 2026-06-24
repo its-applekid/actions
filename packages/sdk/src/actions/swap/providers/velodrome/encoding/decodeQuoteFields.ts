@@ -1,6 +1,11 @@
 import type { Address, Hex } from 'viem'
-import { decodeAbiParameters, getAddress, isAddressEqual, slice } from 'viem'
+import { decodeAbiParameters, getAddress, slice } from 'viem'
 
+import {
+  assertSwapAddressField,
+  assertSwapAmountField,
+  assertSwapDeadlineField,
+} from '@/actions/swap/core/calldataValidation.js'
 import { resolveTokens } from '@/actions/swap/providers/velodrome/encoding/helpers.js'
 import { V3_SWAP_EXACT_IN_INPUT_PARAMS } from '@/actions/swap/providers/velodrome/encoding/routers/cl.js'
 import { V2_SWAP_EXACT_IN_INPUT_PARAMS } from '@/actions/swap/providers/velodrome/encoding/routers/v2.js'
@@ -38,9 +43,9 @@ export function assertUniversalSwapFields(
     assertV2Pool(expectedPool)
     const [recipient, amountIn, amountOutMin, route, payerIsUser, isUni] =
       decodeUniversalV2(input)
-    assertAddress('recipient', recipient, expectedRecipient)
-    assertAmount('amountIn', amountIn, quote.amountInRaw)
-    assertAmount('amountOutMin', amountOutMin, quote.amountOutMinRaw)
+    assertSwapAddressField('recipient', recipient, expectedRecipient)
+    assertSwapAmountField('amountIn', amountIn, quote.amountInRaw)
+    assertSwapAmountField('amountOutMin', amountOutMin, quote.amountOutMinRaw)
     assertBoolean('payerIsUser', payerIsUser, true)
     assertBoolean('isUni', isUni, false)
     assertPackedRoute(quote, route, 21)
@@ -50,9 +55,9 @@ export function assertUniversalSwapFields(
   assertClPool(expectedPool)
   const [recipient, amountIn, amountOutMin, path, payerIsUser] =
     decodeUniversalV3(input)
-  assertAddress('recipient', recipient, expectedRecipient)
-  assertAmount('amountIn', amountIn, quote.amountInRaw)
-  assertAmount('amountOutMin', amountOutMin, quote.amountOutMinRaw)
+  assertSwapAddressField('recipient', recipient, expectedRecipient)
+  assertSwapAmountField('amountIn', amountIn, quote.amountInRaw)
+  assertSwapAmountField('amountOutMin', amountOutMin, quote.amountOutMinRaw)
   assertBoolean('payerIsUser', payerIsUser, true)
   assertPackedRoute(quote, path, 23)
   assertPackedTickSpacing(path, expectedPool.tickSpacing)
@@ -66,14 +71,18 @@ export function assertRouterSwapFields(
 ): void {
   assertRouterKind(quote, fields.kind)
   assertV2Pool(expectedPool)
-  assertAddress('recipient', fields.recipient, quote.recipient)
-  assertDeadline(quote, fields.deadline)
+  assertSwapAddressField('recipient', fields.recipient, quote.recipient)
+  assertSwapDeadlineField(quote, fields.deadline)
   if (fields.amountIn !== undefined) {
-    assertAmount('amountIn', fields.amountIn, quote.amountInRaw)
+    assertSwapAmountField('amountIn', fields.amountIn, quote.amountInRaw)
   } else {
-    assertAmount('amountIn', quote.execution.value, quote.amountInRaw)
+    assertSwapAmountField('amountIn', quote.execution.value, quote.amountInRaw)
   }
-  assertAmount('amountOutMin', fields.amountOutMin, quote.amountOutMinRaw)
+  assertSwapAmountField(
+    'amountOutMin',
+    fields.amountOutMin,
+    quote.amountOutMinRaw,
+  )
   if (fields.routes.length !== 1) {
     throw new QuoteCalldataMismatchError({
       field: 'routes',
@@ -86,11 +95,15 @@ export function assertRouterSwapFields(
     quote.assetOut,
     quote.chainId,
   )
-  assertAddress('route.from', fields.routes[0].from, tokenIn)
-  assertAddress('route.to', fields.routes[0].to, tokenOut)
+  assertSwapAddressField('route.from', fields.routes[0].from, tokenIn)
+  assertSwapAddressField('route.to', fields.routes[0].to, tokenOut)
   assertBoolean('route.stable', fields.routes[0].stable, expectedPool.stable)
   if (fields.routes[0].factory) {
-    assertAddress('route.factory', fields.routes[0].factory, expectedFactory)
+    assertSwapAddressField(
+      'route.factory',
+      fields.routes[0].factory,
+      expectedFactory,
+    )
   }
 }
 
@@ -135,8 +148,8 @@ function assertPackedRoute(
     quote.assetOut,
     quote.chainId,
   )
-  assertAddress('route tokenIn', packedAddress(route, 0), tokenIn)
-  assertAddress(
+  assertSwapAddressField('route tokenIn', packedAddress(route, 0), tokenIn)
+  assertSwapAddressField(
     'route tokenOut',
     packedAddress(route, tokenOutOffset),
     tokenOut,
@@ -153,7 +166,7 @@ function assertPackedStable(route: Hex, expected: boolean): void {
 
 function assertPackedTickSpacing(route: Hex, expected: number): void {
   const actual = Number(BigInt(slice(route, 20, 23)))
-  assertAmount('route.tickSpacing', BigInt(actual), BigInt(expected))
+  assertSwapAmountField('route.tickSpacing', BigInt(actual), BigInt(expected))
 }
 
 function packedAddress(data: Hex, offset: number): Address {
@@ -165,29 +178,6 @@ function packedAddress(data: Hex, offset: number): Address {
       detail: 'unable to decode packed route address',
     })
   }
-}
-
-function assertAddress(
-  field: string,
-  actual: Address,
-  expected: Address,
-): void {
-  if (isAddressEqual(actual, expected)) return
-  throw new QuoteCalldataMismatchError({ field, expected, received: actual })
-}
-
-function assertAmount(field: string, actual: bigint, expected: bigint): void {
-  if (actual === expected) return
-  throw new QuoteCalldataMismatchError({
-    field,
-    expected: expected.toString(),
-    received: actual.toString(),
-  })
-}
-
-function assertDeadline(quote: SwapQuote, actual: bigint): void {
-  const expected = BigInt(quote.deadline)
-  assertAmount('deadline', actual, expected)
 }
 
 function assertRouterKind(

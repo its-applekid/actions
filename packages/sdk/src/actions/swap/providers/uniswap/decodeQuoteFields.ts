@@ -1,6 +1,10 @@
 import type { Address, Hex } from 'viem'
 import { decodeAbiParameters, isAddressEqual, zeroAddress } from 'viem'
 
+import {
+  assertSwapAddressField,
+  assertSwapAmountField,
+} from '@/actions/swap/core/calldataValidation.js'
 import { CURRENCY_AMOUNT_PARAMS } from '@/actions/swap/providers/uniswap/abis.js'
 import { computeMaxInput } from '@/actions/swap/providers/uniswap/encoding.js'
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
@@ -56,16 +60,20 @@ function assertSwapAmounts(
   expectedInput: bigint,
 ): void {
   if (isExactIn) {
-    assertAmount('amountIn', swapParams.amountIn, quote.amountInRaw)
-    assertAmount(
+    assertSwapAmountField('amountIn', swapParams.amountIn, quote.amountInRaw)
+    assertSwapAmountField(
       'amountOutMinimum',
       swapParams.amountOutMinimum,
       quote.amountOutMinRaw,
     )
     return
   }
-  assertAmount('amountOut', swapParams.amountOut, quote.amountOutRaw)
-  assertAmount('amountInMaximum', swapParams.amountInMaximum, expectedInput)
+  assertSwapAmountField('amountOut', swapParams.amountOut, quote.amountOutRaw)
+  assertSwapAmountField(
+    'amountInMaximum',
+    swapParams.amountInMaximum,
+    expectedInput,
+  )
 }
 
 function assertCurrencyAmount(
@@ -76,8 +84,8 @@ function assertCurrencyAmount(
 ): void {
   try {
     const [currency, amount] = decodeAbiParameters(CURRENCY_AMOUNT_PARAMS, data)
-    assertAddress(`${field} currency`, currency, expectedCurrency)
-    assertAmount(`${field} amount`, amount, expectedAmount)
+    assertSwapAddressField(`${field} currency`, currency, expectedCurrency)
+    assertSwapAmountField(`${field} amount`, amount, expectedAmount)
   } catch (error) {
     if (error instanceof QuoteCalldataMismatchError) throw error
     throw new QuoteCalldataMismatchError({
@@ -97,15 +105,23 @@ function assertPoolMatchesQuote(
     tokenIn.toLowerCase() < tokenOut.toLowerCase()
       ? [tokenIn, tokenOut]
       : [tokenOut, tokenIn]
-  assertAddress('poolKey currency0', swapParams.poolKey.currency0, expected0)
-  assertAddress('poolKey currency1', swapParams.poolKey.currency1, expected1)
+  assertSwapAddressField(
+    'poolKey currency0',
+    swapParams.poolKey.currency0,
+    expected0,
+  )
+  assertSwapAddressField(
+    'poolKey currency1',
+    swapParams.poolKey.currency1,
+    expected1,
+  )
   assertNumber('poolKey fee', swapParams.poolKey.fee, expectedPool.fee)
   assertNumber(
     'poolKey tickSpacing',
     swapParams.poolKey.tickSpacing,
     expectedPool.tickSpacing,
   )
-  assertAddress(
+  assertSwapAddressField(
     'poolKey hooks',
     swapParams.poolKey.hooks,
     expectedPool.hooks ?? zeroAddress,
@@ -136,31 +152,5 @@ function assertNumber(field: string, actual: number, expected: number): void {
     field,
     expected: String(expected),
     received: String(actual),
-  })
-}
-
-function assertAddress(
-  field: string,
-  actual: Address,
-  expected: Address,
-): void {
-  if (isAddressEqual(actual, expected)) return
-  throw new QuoteCalldataMismatchError({
-    field,
-    expected,
-    received: actual,
-  })
-}
-
-function assertAmount(
-  field: string,
-  actual: bigint | undefined,
-  expected: bigint,
-): void {
-  if (actual === expected) return
-  throw new QuoteCalldataMismatchError({
-    field,
-    expected: expected.toString(),
-    received: actual?.toString(),
   })
 }

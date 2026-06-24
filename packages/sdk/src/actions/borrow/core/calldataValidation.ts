@@ -2,7 +2,7 @@ import type { Address } from 'viem'
 import { isAddressEqual, maxUint256 } from 'viem'
 
 import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
-import type { BorrowAction } from '@/types/borrow/index.js'
+import type { BorrowAction, BorrowQuote } from '@/types/borrow/index.js'
 
 /**
  * Assert a decoded protocol call is valid for the quote action.
@@ -65,6 +65,56 @@ export function assertAmountField(
     expected: expected?.toString(),
     received: actual.toString(),
   })
+}
+
+/**
+ * Assert a counted transaction leg appears the expected number of times.
+ * @description Borrow calldata decoders use this after classifying every quote
+ * transaction so bundle shape errors report the same mismatch metadata.
+ * @param field - Field name reported when the count differs.
+ * @param actual - Number of decoded legs found in the transaction bundle.
+ * @param expected - Number of legs expected from the quote action.
+ * @returns Nothing when the counts match.
+ * @throws QuoteCalldataMismatchError when the count differs.
+ */
+export function assertCountField(
+  field: string,
+  actual: number,
+  expected: number,
+): void {
+  if (actual === expected) return
+  failCalldata(field, {
+    expected: String(expected),
+    received: String(actual),
+  })
+}
+
+/**
+ * Build a zeroed operation summary for bundle-shape validation.
+ * @description The returned record is keyed by operation name and starts every
+ * operation count at zero.
+ * @param operations - Protocol operations to initialize.
+ * @returns A mutable count record keyed by operation name.
+ */
+export function emptyOperationSummary<Operation extends string>(
+  operations: readonly Operation[],
+): Record<Operation, number> {
+  const summary = {} as Record<Operation, number>
+  for (const operation of operations) summary[operation] = 0
+  return summary
+}
+
+/**
+ * Check whether a borrow quote carries collateral.
+ * @description Treats missing collateral amounts as zero for action-shape
+ * validation.
+ * @param quote - Quote metadata to inspect.
+ * @returns True when the quote includes a positive raw collateral amount.
+ */
+export function quoteHasCollateral(
+  quote: Pick<BorrowQuote, 'collateralAmountRaw'>,
+): boolean {
+  return (quote.collateralAmountRaw ?? 0n) > 0n
 }
 
 /**

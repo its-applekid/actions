@@ -5,7 +5,10 @@ import {
   assertAddressField,
   assertAmountField,
   assertBorrowAction,
+  assertCountField,
+  emptyOperationSummary,
   failCalldata,
+  quoteHasCollateral,
 } from '@/actions/borrow/core/calldataValidation.js'
 import { requireMorphoBlueAddress } from '@/actions/borrow/providers/morpho/blue.js'
 import { assertMorphoMarketParams } from '@/actions/borrow/providers/morpho/decodeMarketParams.js'
@@ -34,7 +37,7 @@ export function assertMorphoQuoteExecution(
   market: MorphoBorrowMarketConfig,
   walletAddress: Address,
 ): void {
-  const summary = emptySummary()
+  const summary = emptyOperationSummary(MORPHO_OPERATIONS)
   for (const transaction of quote.execution.transactions) {
     const kind = classifyMorphoTransaction(
       transaction,
@@ -218,7 +221,7 @@ function assertMorphoBundleShape(
 ): void {
   const expected = expectedMorphoSummary(quote)
   for (const operation of MORPHO_OPERATIONS) {
-    assertCount(
+    assertCountField(
       `transaction.${operation}`,
       actual[operation],
       expected[operation],
@@ -227,11 +230,10 @@ function assertMorphoBundleShape(
 }
 
 function expectedMorphoSummary(quote: BorrowQuote): MorphoSummary {
-  const expected = emptySummary()
-  const hasCollateral = (quote.collateralAmountRaw ?? 0n) > 0n
+  const expected = emptyOperationSummary(MORPHO_OPERATIONS)
   if (quote.action === 'open') {
     expected.borrow = 1
-    if (hasCollateral) expected.supplyCollateral = 1
+    if (quoteHasCollateral(quote)) expected.supplyCollateral = 1
   } else if (quote.action === 'depositCollateral') {
     expected.supplyCollateral = 1
   } else if (quote.action === 'withdrawCollateral') {
@@ -240,24 +242,7 @@ function expectedMorphoSummary(quote: BorrowQuote): MorphoSummary {
     expected.repay = 1
   } else {
     expected.repay = 1
-    if (hasCollateral) expected.withdrawCollateral = 1
+    if (quoteHasCollateral(quote)) expected.withdrawCollateral = 1
   }
   return expected
-}
-
-function emptySummary(): MorphoSummary {
-  return {
-    supplyCollateral: 0,
-    borrow: 0,
-    repay: 0,
-    withdrawCollateral: 0,
-  }
-}
-
-function assertCount(field: string, actual: number, expected: number): void {
-  if (actual === expected) return
-  failCalldata(field, {
-    expected: String(expected),
-    received: String(actual),
-  })
 }

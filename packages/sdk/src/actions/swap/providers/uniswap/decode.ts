@@ -1,6 +1,7 @@
 import type { Hex } from 'viem'
 import { decodeAbiParameters, decodeFunctionData } from 'viem'
 
+import { assertSwapDeadlineField } from '@/actions/swap/core/calldataValidation.js'
 import {
   EXACT_INPUT_SINGLE_PARAMS,
   EXACT_OUTPUT_SINGLE_PARAMS,
@@ -59,7 +60,7 @@ export function assertUniswapV4QuoteBound(
     })
   }
   const { commands, inputs, deadline } = decoded
-  assertDeadline(quote, deadline)
+  assertSwapDeadlineField(quote, deadline)
 
   if (commands.toLowerCase() !== V4_SWAP_COMMAND) {
     throw new QuoteCalldataMismatchError({
@@ -122,16 +123,6 @@ function tryDecodeExecute(
   } catch {
     return undefined
   }
-}
-
-function assertDeadline(quote: SwapQuote, actual: bigint): void {
-  const expected = BigInt(quote.deadline)
-  if (actual === expected) return
-  throw new QuoteCalldataMismatchError({
-    field: 'deadline',
-    expected: expected.toString(),
-    received: actual.toString(),
-  })
 }
 
 function decodeV4SwapInput(input: Hex): {
