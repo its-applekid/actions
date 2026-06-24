@@ -10,9 +10,10 @@ import {
   createPrivyKeyRegistry,
   getMockAuthorizationContext,
 } from '@/__mocks__/MockPrivyClient.js'
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createDivergingAccount, getRandomAddress } from '@/__mocks__/utils.js'
 import { createMockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import { DefaultSmartWalletProvider } from '@/wallet/core/providers/smart/default/DefaultSmartWalletProvider.js'
@@ -256,6 +257,25 @@ describe('WalletProvider', () => {
         }),
       ).rejects.toThrow('Signer does not match any signer in the signers array')
     })
+
+    it('rejects a divergent direct signer before creating a smart wallet', async () => {
+      const smartWalletProvider = new DefaultSmartWalletProvider({
+        chainManager: mockChainManager,
+        actionProviders: { lend: { morpho: mockLendProvider } },
+        actionSettings: {},
+      })
+      const createWalletSpy = vi.spyOn(smartWalletProvider, 'createWallet')
+      const walletProvider = new WalletProvider(undefined, smartWalletProvider)
+      const signer = createDivergingAccount(getRandomAddress())
+
+      await expect(
+        walletProvider.createSmartWallet({
+          signers: [signer.address],
+          signer,
+        }),
+      ).rejects.toBeInstanceOf(SignerAddressMismatchError)
+      expect(createWalletSpy).not.toHaveBeenCalled()
+    })
   })
 
   describe('getSmartWallet', () => {
@@ -344,6 +364,31 @@ describe('WalletProvider', () => {
       ).rejects.toThrow(
         'Either walletAddress or deploymentSigners array must be provided to locate the smart wallet',
       )
+    })
+
+    it('rejects a divergent direct signer before getting a smart wallet', async () => {
+      const smartWalletProvider = new DefaultSmartWalletProvider({
+        chainManager: mockChainManager,
+        actionProviders: { lend: { morpho: mockLendProvider } },
+        actionSettings: {},
+      })
+      const getWalletAddressSpy = vi.spyOn(
+        smartWalletProvider,
+        'getWalletAddress',
+      )
+      const getWalletSpy = vi.spyOn(smartWalletProvider, 'getWallet')
+      const walletProvider = new WalletProvider(undefined, smartWalletProvider)
+      const signer = createDivergingAccount(getRandomAddress())
+
+      await expect(
+        walletProvider.getSmartWallet({
+          walletAddress: getRandomAddress(),
+          signer,
+          signers: [signer.address],
+        }),
+      ).rejects.toBeInstanceOf(SignerAddressMismatchError)
+      expect(getWalletAddressSpy).not.toHaveBeenCalled()
+      expect(getWalletSpy).not.toHaveBeenCalled()
     })
   })
 

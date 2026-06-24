@@ -237,6 +237,20 @@ describe('mapSdkError', () => {
     })
   })
 
+  it('maps wrapped SignerAddressMismatchError causes to 400', () => {
+    const cause = new SignerAddressMismatchError({
+      reportedAddress: '0x0000000000000000000000000000000000000001',
+      recoveredAddress: '0x0000000000000000000000000000000000000002',
+    })
+
+    expect(
+      mapSdkError(new Error('Failed to initialize wallet', { cause })),
+    ).toEqual({
+      status: 400,
+      message: 'Wallet signer does not match its reported address.',
+    })
+  })
+
   it('returns undefined for a generic Error', () => {
     expect(mapSdkError(new Error('something else'))).toBeUndefined()
   })

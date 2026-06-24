@@ -1,10 +1,15 @@
 import { isEthereumWallet } from '@dynamic-labs/ethereum'
 import type { DynamicWaasEVMConnector } from '@dynamic-labs/waas-evm'
 import type { Wallet } from '@dynamic-labs/wallet-connector-core'
-import type { Address, WalletClient } from 'viem'
+import type { Hex, LocalAccount, WalletClient } from 'viem'
+import { isHex } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createDivergingAccount,
+  createSigningAccount,
+  getRandomAddress,
+} from '@/__mocks__/utils.js'
 import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { createSigner } from '@/wallet/react/wallets/hosted/dynamic/utils/createSigner.js'
 
@@ -12,21 +17,46 @@ vi.mock('@dynamic-labs/ethereum', async () => ({
   isEthereumWallet: vi.fn(),
 }))
 
-/**
- * Build a Dynamic wallet whose underlying walletClient signs with a real key
- * but reports `reportedAddress`. Omit `reportedAddress` for a matched wallet.
- */
-function createMockDynamicWallet(reportedAddress?: Address): Wallet {
-  const key = createSigningAccount()
+interface MockDynamicWalletOptions {
+  walletClientAccount?: LocalAccount
+  rawSigningAccount?: LocalAccount
+}
+
+function normalizeRawHash(message: string): Hex {
+  const hash = message.startsWith('0x') ? message : `0x${message}`
+  if (!isHex(hash)) throw new Error('Expected Dynamic raw message hash')
+  return hash
+}
+
+function signRawHash(account: LocalAccount, hash: Hex): Promise<Hex> {
+  if (!account.sign) {
+    throw new Error('Mock Dynamic account does not support raw hash signing')
+  }
+  return account.sign({ hash })
+}
+
+function createMockConnector(
+  account: LocalAccount,
+): Pick<DynamicWaasEVMConnector, 'signRawMessage'> {
+  return {
+    signRawMessage: vi.fn(
+      ({ message }: { accountAddress: string; message: string }) =>
+        signRawHash(account, normalizeRawHash(message)),
+    ),
+  }
+}
+
+function createMockDynamicWallet({
+  walletClientAccount = createSigningAccount(),
+  rawSigningAccount = walletClientAccount,
+}: MockDynamicWalletOptions = {}): Wallet {
   const mockWalletClient = {
-    account: { address: reportedAddress ?? key.address },
-    signMessage: key.signMessage,
-    signTransaction: key.signTransaction,
-    signTypedData: key.signTypedData,
+    account: { address: walletClientAccount.address },
+    signMessage: walletClientAccount.signMessage,
+    signTransaction: walletClientAccount.signTransaction,
+    signTypedData: walletClientAccount.signTypedData,
   } as unknown as WalletClient
-  const mockConnector = {
-    signRawMessage: vi.fn(),
-  } as unknown as DynamicWaasEVMConnector
+  const mockConnector = createMockConnector(rawSigningAccount)
   return {
     getWalletClient: vi.fn().mockResolvedValue(mockWalletClient),
     connector: mockConnector,
@@ -46,7 +76,21 @@ describe('createSigner (React Dynamic)', () => {
 
   it('throws when walletClient.account.address is not controlled by the signing backend', async () => {
     vi.mocked(isEthereumWallet).mockReturnValue(true)
-    const wallet = createMockDynamicWallet(getRandomAddress())
+    const wallet = createMockDynamicWallet({
+      walletClientAccount: createDivergingAccount(getRandomAddress()),
+    })
+
+    await expect(createSigner({ wallet })).rejects.toBeInstanceOf(
+      SignerAddressMismatchError,
+    )
+  })
+
+  it('throws when the connector raw signer differs from walletClient.signMessage', async () => {
+    vi.mocked(isEthereumWallet).mockReturnValue(true)
+    const wallet = createMockDynamicWallet({
+      walletClientAccount: createSigningAccount(),
+      rawSigningAccount: createSigningAccount(),
+    })
 
     await expect(createSigner({ wallet })).rejects.toBeInstanceOf(
       SignerAddressMismatchError,

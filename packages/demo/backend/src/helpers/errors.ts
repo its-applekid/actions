@@ -175,6 +175,23 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
     ],
   ]
 
+const MAX_ERROR_CAUSE_DEPTH = 5
+
+function findMappedSdkError(error: unknown): MappedSdkError | undefined {
+  let current: unknown = error
+  const seen = new Set<unknown>()
+  for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
+    if (!current || seen.has(current)) return undefined
+    seen.add(current)
+    for (const [Ctor, mapped] of SDK_ERROR_MAPPINGS) {
+      if (current instanceof Ctor) return mapped
+    }
+    if (!(current instanceof Error)) return undefined
+    current = current.cause
+  }
+  return undefined
+}
+
 /**
  * Translate a thrown SDK error to a structured HTTP response shape.
  * Returns `undefined` when the error isn't recognized; callers fall back
@@ -186,10 +203,7 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
  */
 export function mapSdkError(error: unknown): MappedSdkError | undefined {
   try {
-    for (const [Ctor, mapped] of SDK_ERROR_MAPPINGS) {
-      if (error instanceof Ctor) return mapped
-    }
-    return undefined
+    return findMappedSdkError(error)
   } catch {
     return undefined
   }

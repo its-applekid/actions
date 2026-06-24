@@ -66,9 +66,9 @@ describe('PrivyWallet (React)', () => {
       createDivergingAccount(getRandomAddress()) as unknown as PrivyViemAccount,
     )
 
-    const error = await createWallet().catch((e: unknown) => e)
-
-    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+    await expect(createWallet()).rejects.toBeInstanceOf(
+      SignerAddressMismatchError,
+    )
   })
 
   it('creates a WalletClient with correct configuration', async () => {

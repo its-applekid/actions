@@ -7,6 +7,7 @@ import type {
 import type { HostedWalletProvider } from '@/wallet/core/providers/hosted/abstract/HostedWalletProvider.js'
 import type { SmartWalletProvider } from '@/wallet/core/providers/smart/abstract/SmartWalletProvider.js'
 import type { SmartWalletCreationResult } from '@/wallet/core/providers/smart/abstract/types/index.js'
+import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 import type { SmartWallet } from '@/wallet/core/wallets/smart/abstract/SmartWallet.js'
 
@@ -55,6 +56,7 @@ export class WalletProvider<
   async createSmartWallet(
     params: CreateSmartWalletOptions,
   ): Promise<SmartWalletCreationResult<SmartWallet>> {
+    await reconcileSignerAddress(params.signer)
     return this.smartWalletProvider.createWallet({ ...params })
   }
 
@@ -115,6 +117,8 @@ export class WalletProvider<
         )
       }
     }
+
+    await reconcileSignerAddress(signer)
 
     const walletAddress =
       walletAddressParam ||

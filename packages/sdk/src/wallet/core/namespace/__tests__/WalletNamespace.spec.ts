@@ -461,11 +461,9 @@ describe('WalletNamespace', () => {
       // must be rejected, not silently wrapped in a usable LocalWallet.
       const divergent = createDivergingAccount(getRandomAddress())
 
-      const error = await walletNamespace
-        .toActionsWallet(divergent)
-        .catch((e: unknown) => e)
-
-      expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+      await expect(
+        walletNamespace.toActionsWallet(divergent),
+      ).rejects.toBeInstanceOf(SignerAddressMismatchError)
     })
 
     it('should expose lend namespace when an Aave provider is configured', async () => {

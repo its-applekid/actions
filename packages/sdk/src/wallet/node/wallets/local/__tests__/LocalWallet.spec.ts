@@ -47,14 +47,14 @@ describe('LocalWallet', () => {
     // A hosted-derived signer collision routed in as a bare LocalAccount.
     const account = createDivergingAccount(getRandomAddress())
 
-    const error = await LocalWallet.create({
-      account,
-      chainManager: mockChainManager,
-      actionProviders: {},
-      actionSettings: {},
-    }).catch((e: unknown) => e)
-
-    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+    await expect(
+      LocalWallet.create({
+        account,
+        chainManager: mockChainManager,
+        actionProviders: {},
+        actionSettings: {},
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('should create a wallet client with correct configuration', async () => {

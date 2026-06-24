@@ -94,21 +94,21 @@ describe('TurnkeyWallet', () => {
     const signWith = 'key_x'
     const wrongAddress = turnkeyKeys.addressFor('key_y')
 
-    const error = await createTurnkeyWallet({
-      signWith,
-      ethereumAddress: wrongAddress,
-    }).catch((e: unknown) => e)
-
-    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+    await expect(
+      createTurnkeyWallet({
+        signWith,
+        ethereumAddress: wrongAddress,
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('throws at construction on a malformed ethereumAddress', async () => {
-    const error = await createTurnkeyWallet({
-      signWith: 'key_x',
-      ethereumAddress: '0x123',
-    }).catch((e: unknown) => e)
-
-    expect((error as Error).cause).toBeInstanceOf(InvalidParamsError)
+    await expect(
+      createTurnkeyWallet({
+        signWith: 'key_x',
+        ethereumAddress: '0x123',
+      }),
+    ).rejects.toBeInstanceOf(InvalidParamsError)
   })
 
   it('should create a wallet client with correct configuration', async () => {

@@ -9,6 +9,7 @@ import type {
 } from '@/actions/shared/ActionModule.js'
 import type { WalletSwapNamespace } from '@/actions/swap/namespaces/WalletSwapNamespace.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { ActionsError } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import { fetchERC20Balance, fetchETHBalance } from '@/services/tokenBalance.js'
 import type {
@@ -94,7 +95,7 @@ export abstract class Wallet {
 
     // One pass over the action registry attaches every configured
     // `wallet.<name>` namespace. Adding a future action (e.g. stake,
-    // bridge, perp) is purely a registry entry — this loop, `Wallet`'s
+    // bridge, perp) is purely a registry entry; this loop, `Wallet`'s
     // shape, and every consumer of it stay unchanged.
     for (const name of ACTION_NAMES) {
       attachWalletNamespace(this, name, moduleDeps)
@@ -156,8 +157,8 @@ export abstract class Wallet {
    * On failure, the stored promise is cleared so callers may retry
    * initialization later.
    * @returns Promise that resolves once the wallet is fully initialized
-   * @throws Error wrapping the underlying failure cause from
-   * {@link performInitialization}
+   * @throws ActionsError from {@link performInitialization} without wrapping.
+   * @throws Error wrapping non-SDK failure causes from {@link performInitialization}.
    */
   protected async initialize() {
     if (this.initPromise) return this.initPromise
@@ -167,6 +168,7 @@ export abstract class Wallet {
       } catch (error) {
         // Clear cached promise to allow retry after a failure
         this.initPromise = undefined
+        if (error instanceof ActionsError) throw error
         throw new Error('Failed to initialize wallet', { cause: error })
       }
     })()

@@ -82,6 +82,11 @@ export function validateAddress(
 
 /**
  * Validate and checksum-normalize a required EVM address.
+ * @description Rejects malformed address strings before returning the checksum
+ * form used for comparisons and downstream wallet parameters.
+ * @param address - Candidate EVM address string
+ * @param label - Parameter label used in the thrown validation error
+ * @returns The checksum-normalized address
  * @throws InvalidParamsError when `isAddress` rejects the value.
  */
 export function normalizeAddress(address: string, label: string): Address {
@@ -91,6 +96,11 @@ export function normalizeAddress(address: string, label: string): Address {
 
 /**
  * Validate and checksum-normalize an optional EVM address.
+ * @description Leaves absent values unset while enforcing the same syntax and
+ * checksum normalization as {@link normalizeAddress} for present values.
+ * @param address - Optional candidate EVM address string
+ * @param label - Parameter label used in the thrown validation error
+ * @returns The checksum-normalized address, or `undefined` when omitted
  * @throws InvalidParamsError when the value is present and malformed.
  */
 export function normalizeOptionalAddress(

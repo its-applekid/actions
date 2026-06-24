@@ -1,11 +1,19 @@
 import { isEthereumWallet } from '@dynamic-labs/ethereum'
 import type { DynamicWaasEVMConnector } from '@dynamic-labs/waas-evm'
-import type { LocalAccount } from 'viem'
+import type { Hex, LocalAccount } from 'viem'
+import { hashMessage } from 'viem'
 import { toAccount } from 'viem/accounts'
 
 import { normalizeAddress } from '@/utils/validation.js'
 import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/providers/hosted/types/index.js'
+
+async function signRawHash(account: LocalAccount, hash: Hex): Promise<Hex> {
+  if (!account.sign) {
+    throw new Error('Dynamic signer does not support raw hash signing')
+  }
+  return account.sign({ hash })
+}
 
 /**
  * Create a LocalAccount from a Dynamic wallet
@@ -45,5 +53,8 @@ export async function createSigner(
     signTransaction: walletClient.signTransaction,
     signTypedData: walletClient.signTypedData,
   })
-  return reconcileSignerAddress(account)
+  return reconcileSignerAddress(account, {
+    signSelfTestMessage: (message) =>
+      signRawHash(account, hashMessage(message)),
+  })
 }

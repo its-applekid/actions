@@ -3,7 +3,11 @@ import * as Viem from 'viem'
 import { unichain } from 'viem/chains'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
+import {
+  createDivergingAccount,
+  createSigningAccount,
+  getRandomAddress,
+} from '@/__mocks__/utils.js'
 import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
@@ -26,24 +30,44 @@ const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
 
-/**
- * Build a Dynamic wallet whose underlying walletClient signs with a real key
- * but reports `reportedAddress`. Omit `reportedAddress` for a matched wallet.
- */
-function createMockDynamicWallet(
-  reportedAddress?: Viem.Address,
-): DynamicHostedWalletToActionsWalletOptions['wallet'] & {
+interface MockDynamicWalletOptions {
+  walletClientAccount?: Viem.LocalAccount
+  rawSigningAccount?: Viem.LocalAccount
+}
+
+function normalizeRawHash(message: string): Viem.Hex {
+  const hash = message.startsWith('0x') ? message : `0x${message}`
+  if (!Viem.isHex(hash)) throw new Error('Expected Dynamic raw message hash')
+  return hash
+}
+
+function signRawHash(
+  account: Viem.LocalAccount,
+  hash: Viem.Hex,
+): Promise<Viem.Hex> {
+  if (!account.sign) {
+    throw new Error('Mock Dynamic account does not support raw hash signing')
+  }
+  return account.sign({ hash })
+}
+
+function createMockDynamicWallet({
+  walletClientAccount = createSigningAccount(),
+  rawSigningAccount = walletClientAccount,
+}: MockDynamicWalletOptions = {}): DynamicHostedWalletToActionsWalletOptions['wallet'] & {
   __mock: { connector: { signRawMessage: ReturnType<typeof vi.fn> } }
 } {
-  const key = createSigningAccount()
   const mockConnector = {
-    signRawMessage: vi.fn().mockResolvedValue('0xsigned'),
+    signRawMessage: vi.fn(
+      ({ message }: { accountAddress: Viem.Address; message: string }) =>
+        signRawHash(rawSigningAccount, normalizeRawHash(message)),
+    ),
   }
   const mockWalletClient = {
-    account: { address: reportedAddress ?? key.address },
-    signMessage: key.signMessage,
-    signTransaction: key.signTransaction,
-    signTypedData: key.signTypedData,
+    account: { address: walletClientAccount.address },
+    signMessage: walletClientAccount.signMessage,
+    signTransaction: walletClientAccount.signTransaction,
+    signTypedData: walletClientAccount.signTypedData,
   } as unknown as Viem.WalletClient
   return {
     connector: mockConnector,
@@ -95,16 +119,34 @@ describe('DynamicWallet', () => {
   })
 
   it('throws at construction when the reported address diverges from the signing backend', async () => {
-    const dynamic = createMockDynamicWallet(getRandomAddress())
+    const dynamic = createMockDynamicWallet({
+      walletClientAccount: createDivergingAccount(getRandomAddress()),
+    })
 
-    const error = await DynamicWallet.create({
-      dynamicWallet: dynamic,
-      chainManager: mockChainManager,
-      actionProviders: {},
-      actionSettings: {},
-    }).catch((e: unknown) => e)
+    await expect(
+      DynamicWallet.create({
+        dynamicWallet: dynamic,
+        chainManager: mockChainManager,
+        actionProviders: {},
+        actionSettings: {},
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
+  })
 
-    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+  it('throws when the raw connector signer differs from walletClient.signMessage', async () => {
+    const dynamic = createMockDynamicWallet({
+      walletClientAccount: createSigningAccount(),
+      rawSigningAccount: createSigningAccount(),
+    })
+
+    await expect(
+      DynamicWallet.create({
+        dynamicWallet: dynamic,
+        chainManager: mockChainManager,
+        actionProviders: {},
+        actionSettings: {},
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('should create a wallet client with correct configuration', async () => {

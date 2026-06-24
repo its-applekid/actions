@@ -102,15 +102,12 @@ describe('PrivyWallet', () => {
     // The address belongs to a different wallet's key.
     const wrongAddress = privyKeys.addressFor('some-other-wallet')
 
-    // `Wallet.initialize` wraps initialization failures, so the named seam
-    // error is surfaced as the cause at construction, not at first signed tx.
-    const error = await createAndInitPrivyWallet({
-      walletId,
-      address: wrongAddress,
-    }).catch((e: unknown) => e)
-
-    expect(error).toBeInstanceOf(Error)
-    expect((error as Error).cause).toBeInstanceOf(SignerAddressMismatchError)
+    await expect(
+      createAndInitPrivyWallet({
+        walletId,
+        address: wrongAddress,
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('should create a wallet client with correct configuration', async () => {
