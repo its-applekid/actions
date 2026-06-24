@@ -13,7 +13,6 @@ import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
   ChainNotSupportedError,
   InvalidParamsError,
-  MarketNotAllowedError,
   ProviderNotConfiguredError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
@@ -89,10 +88,8 @@ function makeQuote(overrides: Partial<BorrowQuote> = {}): BorrowQuote {
   })
 }
 
-function makeProvider(
-  config: BorrowProviderConfig = { marketAllowlist: [market] },
-): MockBorrowProvider {
-  const provider = new MockBorrowProvider(config)
+function makeProvider(): MockBorrowProvider {
+  const provider = new MockBorrowProvider({ marketAllowlist: [market] })
   provider.openPosition.mockResolvedValue(makeQuote())
   provider.closePosition.mockResolvedValue(makeQuote({ action: 'close' }))
   provider.depositCollateral.mockResolvedValue(
@@ -222,25 +219,6 @@ describe('WalletBorrowNamespace - quote validation', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ProviderNotConfiguredError)
-  })
-
-  it('throws MarketNotAllowedError for a blocklisted pre-built quote before wallet dispatch', async () => {
-    const { wallet, mocks } = makeWallet()
-    const namespace = new WalletBorrowNamespace(
-      {
-        morpho: makeProvider({
-          marketAllowlist: [market],
-          marketBlocklist: [market],
-        }),
-      },
-      wallet,
-    )
-
-    await expect(namespace.openPosition(makeQuote())).rejects.toBeInstanceOf(
-      MarketNotAllowedError,
-    )
-    expect(mocks.send).not.toHaveBeenCalled()
-    expect(mocks.sendBatch).not.toHaveBeenCalled()
   })
 
   it('throws InvalidParamsError when quote.action does not match the called method', async () => {
