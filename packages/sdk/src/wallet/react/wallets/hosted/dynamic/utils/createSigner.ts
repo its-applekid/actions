@@ -1,18 +1,40 @@
 import { isEthereumWallet } from '@dynamic-labs/ethereum'
-import type { DynamicWaasEVMConnector } from '@dynamic-labs/waas-evm'
-import type { Hex, LocalAccount } from 'viem'
+import type { Address, Hex, LocalAccount } from 'viem'
 import { hashMessage } from 'viem'
 import { toAccount } from 'viem/accounts'
 
+import { InvalidParamsError } from '@/core/error/errors.js'
 import { normalizeAddress } from '@/utils/validation.js'
 import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/providers/hosted/types/index.js'
 
-async function signRawHash(account: LocalAccount, hash: Hex): Promise<Hex> {
-  if (!account.sign) {
-    throw new Error('Dynamic signer does not support raw hash signing')
-  }
-  return account.sign({ hash })
+interface DynamicRawMessageSigner {
+  signRawMessage: (params: {
+    accountAddress: Address
+    message: string
+  }) => Promise<Hex>
+}
+
+function isDynamicRawMessageSigner(
+  value: unknown,
+): value is DynamicRawMessageSigner {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return typeof record.signRawMessage === 'function'
+}
+
+function requireDynamicRawMessageSigner(
+  connector: unknown,
+): DynamicRawMessageSigner {
+  if (isDynamicRawMessageSigner(connector)) return connector
+  throw new InvalidParamsError({
+    param: 'dynamicWallet.connector',
+    expected: 'Dynamic connector with signRawMessage support',
+  })
+}
+
+function stripHexPrefix(value: Hex): string {
+  return value.startsWith('0x') ? value.slice(2) : value
 }
 
 /**
@@ -36,7 +58,7 @@ export async function createSigner(
     throw new Error('Wallet not connected or not EVM compatible')
   }
   const walletClient = await wallet.getWalletClient()
-  const connector = wallet.connector as DynamicWaasEVMConnector
+  const connector = requireDynamicRawMessageSigner(wallet.connector)
   const accountAddress = normalizeAddress(
     walletClient.account.address,
     'walletClient.account.address',
@@ -46,7 +68,7 @@ export async function createSigner(
     sign: ({ hash }) => {
       return connector.signRawMessage({
         accountAddress,
-        message: hash.startsWith('0x') ? hash.slice(2) : hash,
+        message: stripHexPrefix(hash),
       })
     },
     signMessage: walletClient.signMessage,
@@ -54,7 +76,12 @@ export async function createSigner(
     signTypedData: walletClient.signTypedData,
   })
   return reconcileSignerAddress(account, {
-    signSelfTestMessage: (message) =>
-      signRawHash(account, hashMessage(message)),
+    additionalSignSelfTestMessages: [
+      (message) =>
+        connector.signRawMessage({
+          accountAddress,
+          message: stripHexPrefix(hashMessage(message)),
+        }),
+    ],
   })
 }

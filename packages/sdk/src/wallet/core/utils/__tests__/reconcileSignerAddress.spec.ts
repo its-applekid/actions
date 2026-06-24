@@ -20,9 +20,22 @@ describe('reconcileSignerAddress', () => {
     // Signs with a real key but reports a different, unrelated address.
     const account = createDivergingAccount(getRandomAddress())
 
-    await expect(reconcileSignerAddress(account)).rejects.toBeInstanceOf(
-      SignerAddressMismatchError,
-    )
+    await expect(
+      reconcileSignerAddress(account, { verifyTransactionSigner: true }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
+  })
+
+  it('throws when signTransaction recovers to a different key than signMessage', async () => {
+    const messageAccount = createSigningAccount()
+    const transactionAccount = createSigningAccount()
+    const account = {
+      ...messageAccount,
+      signTransaction: transactionAccount.signTransaction,
+    }
+
+    await expect(
+      reconcileSignerAddress(account, { verifyTransactionSigner: true }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
   })
 
   it('reports both the reported and recovered addresses on the error', async () => {

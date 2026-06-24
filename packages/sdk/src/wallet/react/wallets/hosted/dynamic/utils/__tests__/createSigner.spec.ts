@@ -19,6 +19,7 @@ vi.mock('@dynamic-labs/ethereum', async () => ({
 
 interface MockDynamicWalletOptions {
   walletClientAccount?: LocalAccount
+  messageSigningAccount?: LocalAccount
   rawSigningAccount?: LocalAccount
 }
 
@@ -48,13 +49,14 @@ function createMockConnector(
 
 function createMockDynamicWallet({
   walletClientAccount = createSigningAccount(),
+  messageSigningAccount = walletClientAccount,
   rawSigningAccount = walletClientAccount,
 }: MockDynamicWalletOptions = {}): Wallet {
   const mockWalletClient = {
     account: { address: walletClientAccount.address },
-    signMessage: walletClientAccount.signMessage,
-    signTransaction: walletClientAccount.signTransaction,
-    signTypedData: walletClientAccount.signTypedData,
+    signMessage: messageSigningAccount.signMessage,
+    signTransaction: messageSigningAccount.signTransaction,
+    signTypedData: messageSigningAccount.signTypedData,
   } as unknown as WalletClient
   const mockConnector = createMockConnector(rawSigningAccount)
   return {
@@ -90,6 +92,20 @@ describe('createSigner (React Dynamic)', () => {
     const wallet = createMockDynamicWallet({
       walletClientAccount: createSigningAccount(),
       rawSigningAccount: createSigningAccount(),
+    })
+
+    await expect(createSigner({ wallet })).rejects.toBeInstanceOf(
+      SignerAddressMismatchError,
+    )
+  })
+
+  it('throws when walletClient.signMessage differs from the raw connector signer', async () => {
+    vi.mocked(isEthereumWallet).mockReturnValue(true)
+    const walletClientAccount = createSigningAccount()
+    const wallet = createMockDynamicWallet({
+      walletClientAccount,
+      messageSigningAccount: createSigningAccount(),
+      rawSigningAccount: walletClientAccount,
     })
 
     await expect(createSigner({ wallet })).rejects.toBeInstanceOf(

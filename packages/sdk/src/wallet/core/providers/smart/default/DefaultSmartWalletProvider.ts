@@ -73,6 +73,7 @@ export class DefaultSmartWalletProvider extends SmartWalletProvider {
    * @returns Promise resolving to deployment result containing:
    * - `wallet`: The created SmartWallet instance
    * - `deployments`: Array of deployment results with chainId, receipt, success flag, and error
+   * @throws SignerAddressMismatchError if the signer does not control its reported address
    */
   async createWallet(params: {
     signer: LocalAccount
@@ -164,6 +165,7 @@ export class DefaultSmartWalletProvider extends SmartWalletProvider {
    * @param params.signer - Local account used for signing transactions
    * @param params.ownerIndex - Index of the signer in the wallet's owner list (defaults to 0)
    * @returns SmartWallet instance
+   * @throws SignerAddressMismatchError if the signer does not control its reported address
    */
   async getWallet(params: {
     walletAddress: Address

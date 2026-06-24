@@ -48,6 +48,7 @@ export class PrivyWallet extends EOAWallet {
    */
   protected override async performInitialization(): Promise<void> {
     this.signer = await this.createSigner()
+    await super.performInitialization()
   }
 
   /**

@@ -8,8 +8,9 @@ import { toCoinbaseSmartAccount } from 'viem/account-abstraction'
 import { baseSepolia, unichain } from 'viem/chains'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
 import { createMockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
+import { SignerAddressMismatchError } from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { LendProviderConfig } from '@/types/actions.js'
@@ -36,12 +37,9 @@ vi.mock(
 )
 
 // Mock data
-const mockSignerAddress = getRandomAddress()
+const mockSigner = createSigningAccount()
+const mockSignerAddress = mockSigner.address
 const mockSigners: Address[] = [mockSignerAddress, getRandomAddress()]
-const mockSigner: LocalAccount = {
-  address: mockSignerAddress,
-  type: 'local',
-} as unknown as LocalAccount
 const mockChainManager = new MockChainManager({
   supportedChains: [baseSepolia.id, unichain.id],
 }) as unknown as ChainManager
@@ -71,10 +69,7 @@ describe('DefaultSmartWallet', () => {
       mockChainManager.getPublicClient(baseSepolia.id),
     )
     publicClient.readContract = vi.fn().mockResolvedValue(mockDeploymentAddress)
-    const signer = {
-      address: mockSignerAddress,
-      type: 'local',
-    } as unknown as LocalAccount
+    const signer = createSigningAccount()
     const signers = [signer.address, getRandomAddress()]
     const wallet = await createAndInitDefaultSmartWallet({ signers, signer })
 
@@ -95,12 +90,25 @@ describe('DefaultSmartWallet', () => {
     expect(wallet.address).toBe(deploymentAddress)
   })
 
+  it('rejects a signer whose transaction backend recovers to a different key', async () => {
+    const messageSigner = createSigningAccount()
+    const transactionSigner = createSigningAccount()
+    const signer = {
+      ...messageSigner,
+      signTransaction: transactionSigner.signTransaction,
+    }
+
+    await expect(
+      createAndInitDefaultSmartWallet({
+        signer,
+        signers: [messageSigner.address],
+      }),
+    ).rejects.toBeInstanceOf(SignerAddressMismatchError)
+  })
+
   it('should call toCoinbaseSmartAccount with correct arguments', async () => {
     const deploymentAddress = getRandomAddress()
-    const signer = {
-      address: getRandomAddress(),
-      type: 'local',
-    } as unknown as LocalAccount
+    const signer = createSigningAccount()
     const signers = [getRandomAddress(), signer.address]
     const signerIndex = 1
     const nonce = BigInt(123)
@@ -555,10 +563,7 @@ describe('DefaultSmartWallet', () => {
 
   describe('deploy', () => {
     it('should deploy wallet successfully when not already deployed', async () => {
-      const signer = {
-        address: getRandomAddress(),
-        type: 'local',
-      } as unknown as LocalAccount
+      const signer = createSigningAccount()
       const signers = [signer.address, getRandomAddress()]
       const deploymentAddress = getRandomAddress()
       const nonce = BigInt(123)
@@ -693,10 +698,7 @@ describe('DefaultSmartWallet', () => {
     })
 
     it('should pass correct chainId to sendBatch', async () => {
-      const signer = {
-        address: getRandomAddress(),
-        type: 'local',
-      } as unknown as LocalAccount
+      const signer = createSigningAccount()
       const signers = [signer.address]
       const deploymentAddress = getRandomAddress()
       const nonce = BigInt(456)

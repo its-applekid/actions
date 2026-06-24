@@ -47,7 +47,9 @@ export class WalletProvider<
   async createSmartWallet(
     params: CreateSmartWalletOptions,
   ): Promise<SmartWalletCreationResult<SmartWallet>> {
-    await reconcileSignerAddress(params.signer)
+    await reconcileSignerAddress(params.signer, {
+      verifyTransactionSigner: true,
+    })
     return this.smartWalletProvider.createWallet({ ...params })
   }
 
@@ -102,7 +104,7 @@ export class WalletProvider<
       )
     }
 
-    await reconcileSignerAddress(signer)
+    await reconcileSignerAddress(signer, { verifyTransactionSigner: true })
 
     const walletAddress =
       walletAddressParam ||

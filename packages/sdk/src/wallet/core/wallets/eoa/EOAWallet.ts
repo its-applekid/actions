@@ -9,6 +9,7 @@ import { createWalletClient, nonceManager } from 'viem'
 
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import type { TransactionData } from '@/types/lend/index.js'
+import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type { EOATransactionReceipt } from '@/wallet/core/wallets/abstract/types/index.js'
 import { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 
@@ -20,6 +21,18 @@ import { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
  * Transactions are submitted directly to the network and processed by validators.
  */
 export abstract class EOAWallet extends Wallet {
+  /**
+   * Verify the signer backend used by EOA transaction submission.
+   * @description Hosted wallet construction performs the shared message
+   * reconciliation first. EOA wallets additionally verify `signTransaction`
+   * before the wallet can send transactions through viem.
+   * @returns Promise that resolves once the signer transaction backend is reconciled
+   * @throws SignerAddressMismatchError if the transaction signer does not control the reported address
+   */
+  protected override async performInitialization(): Promise<void> {
+    await reconcileSignerAddress(this.signer, { verifyTransactionSigner: true })
+  }
+
   /**
    * Create a WalletClient for this EOA wallet.
    *

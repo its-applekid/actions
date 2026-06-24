@@ -20,6 +20,7 @@ import type { Asset } from '@/types/asset.js'
 import type { TransactionData } from '@/types/transaction.js'
 import { parseAssetAmount } from '@/utils/assets.js'
 import { TransactionConfirmedButRevertedError } from '@/wallet/core/error/errors.js'
+import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import { retryOnStaleRead } from '@/wallet/core/utils/retryOnStaleRead.js'
 import { SmartWallet } from '@/wallet/core/wallets/smart/abstract/SmartWallet.js'
 import type { Signer } from '@/wallet/core/wallets/smart/abstract/types/index.js'
@@ -108,6 +109,16 @@ export class DefaultSmartWallet extends SmartWallet {
     })
   }
 
+  /**
+   * Create a default smart wallet instance.
+   * @description Reconciles the local signer, installs it into the owner set,
+   * initializes the wallet address, and returns a wallet ready for
+   * ERC-4337 operations.
+   * @param params - Smart wallet construction parameters
+   * @returns Promise resolving to an initialized default smart wallet
+   * @throws SignerAddressMismatchError if the signer does not control its reported address
+   * @throws Error if the signer is not included in the signers array
+   */
   static async create(params: {
     signer: LocalAccount
     chainManager: ChainManager
@@ -119,6 +130,9 @@ export class DefaultSmartWallet extends SmartWallet {
     nonce?: bigint
     attributionSuffix?: Hex
   }): Promise<DefaultSmartWallet> {
+    await reconcileSignerAddress(params.signer, {
+      verifyTransactionSigner: true,
+    })
     const signers = params.signers ?? [params.signer.address]
     const wallet = new DefaultSmartWallet({
       signers,

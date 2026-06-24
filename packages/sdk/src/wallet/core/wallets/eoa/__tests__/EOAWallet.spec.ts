@@ -10,7 +10,7 @@ import { createWalletClient } from 'viem'
 import { unichain } from 'viem/chains'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getRandomAddress } from '@/__mocks__/utils.js'
+import { createSigningAccount, getRandomAddress } from '@/__mocks__/utils.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { TransactionData } from '@/types/lend/index.js'
@@ -53,18 +53,11 @@ class TestEOAWallet extends EOAWallet {
   }
 }
 
-const mockAddress = getRandomAddress()
+const mockLocalAccount = createSigningAccount()
+const mockAddress = mockLocalAccount.address
 const mockChainManager = new MockChainManager({
   supportedChains: [130], // Unichain
 }) as unknown as ChainManager
-
-const mockLocalAccount = {
-  address: mockAddress,
-  signMessage: vi.fn(),
-  sign: vi.fn(),
-  signTransaction: vi.fn(),
-  signTypedData: vi.fn(),
-} as unknown as LocalAccount
 
 const mockTransactionHash: Hex =
   '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'

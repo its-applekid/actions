@@ -6,10 +6,10 @@ import { createSigningAccount } from '@/__mocks__/utils.js'
 /**
  * Minimal Turnkey client stub. The real signing happens through the mocked
  * `@turnkey/viem` `createAccount`, so the client only needs to exist for typing.
- * @returns An empty object cast to the requested Turnkey client type.
+ * @returns Empty client token passed through to the mocked Turnkey account factory.
  */
-export function createMockTurnkeyClient<T = unknown>(): T {
-  return {} as T
+export function createMockTurnkeyClient() {
+  return {}
 }
 
 /**

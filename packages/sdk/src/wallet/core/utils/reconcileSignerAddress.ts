@@ -1,5 +1,14 @@
-import type { Hex, LocalAccount } from 'viem'
-import { getAddress, recoverMessageAddress } from 'viem'
+import type {
+  Address,
+  Hex,
+  LocalAccount,
+  TransactionSerializableLegacy,
+} from 'viem'
+import {
+  getAddress,
+  recoverMessageAddress,
+  recoverTransactionAddress,
+} from 'viem'
 
 import { SignerAddressMismatchError } from '@/core/error/errors.js'
 
@@ -12,10 +21,24 @@ import { SignerAddressMismatchError } from '@/core/error/errors.js'
 const SIGNER_RECONCILIATION_MESSAGE =
   'actions-sdk:signer-address-reconciliation:v1' as const
 
+const SIGNER_RECONCILIATION_TRANSACTION = {
+  chainId: 1,
+  type: 'legacy',
+  nonce: 0,
+  gas: 21_000n,
+  gasPrice: 0n,
+  to: '0x0000000000000000000000000000000000000001',
+  value: 0n,
+  data: '0x',
+} as const satisfies TransactionSerializableLegacy
+
+type SelfTestMessageSigner = (
+  message: typeof SIGNER_RECONCILIATION_MESSAGE,
+) => Promise<Hex>
+
 interface ReconcileSignerAddressOptions {
-  signSelfTestMessage?: (
-    message: typeof SIGNER_RECONCILIATION_MESSAGE,
-  ) => Promise<Hex>
+  additionalSignSelfTestMessages?: readonly SelfTestMessageSigner[]
+  verifyTransactionSigner?: boolean
 }
 
 /**
@@ -27,7 +50,9 @@ interface ReconcileSignerAddressOptions {
  * wallet can build, approve, or sign against an account its key cannot control.
  * The reported address is normalized through `getAddress` so the comparison is
  * checksum-stable. Callers with composed signing backends can provide
- * `signSelfTestMessage` to reconcile the backend used by later signing.
+ * `additionalSignSelfTestMessages` to reconcile additional message-signing
+ * backends used by later signing, or `verifyTransactionSigner` when the SDK
+ * will use `signTransaction` for EOA/smart-wallet operations.
  * @param signer - The viem `LocalAccount` to reconcile
  * @param options - Optional signer override for the fixed self-test payload
  * @returns The same `signer`, once reconciled, so callers can chain
@@ -39,18 +64,44 @@ export async function reconcileSignerAddress<T extends LocalAccount>(
   options: ReconcileSignerAddressOptions = {},
 ): Promise<T> {
   const reportedAddress = getAddress(signer.address)
-  const signSelfTestMessage =
-    options.signSelfTestMessage ??
-    ((message) => signer.signMessage({ message }))
-  const signature = await signSelfTestMessage(SIGNER_RECONCILIATION_MESSAGE)
-  const recoveredAddress = getAddress(
-    await recoverMessageAddress({
-      message: SIGNER_RECONCILIATION_MESSAGE,
-      signature,
+  const signSelfTestMessages = [
+    (message: typeof SIGNER_RECONCILIATION_MESSAGE) =>
+      signer.signMessage({ message }),
+    ...(options.additionalSignSelfTestMessages ?? []),
+  ]
+  await Promise.all(
+    signSelfTestMessages.map(async (signSelfTestMessage) => {
+      const signature = await signSelfTestMessage(SIGNER_RECONCILIATION_MESSAGE)
+      const recoveredAddress = getAddress(
+        await recoverMessageAddress({
+          message: SIGNER_RECONCILIATION_MESSAGE,
+          signature,
+        }),
+      )
+      assertRecoveredAddress({ reportedAddress, recoveredAddress })
     }),
   )
-  if (recoveredAddress !== reportedAddress) {
-    throw new SignerAddressMismatchError({ reportedAddress, recoveredAddress })
+  if (options.verifyTransactionSigner) {
+    const recoveredTransactionAddress = getAddress(
+      await recoverTransactionAddress({
+        serializedTransaction: await signer.signTransaction(
+          SIGNER_RECONCILIATION_TRANSACTION,
+        ),
+      }),
+    )
+    assertRecoveredAddress({
+      reportedAddress,
+      recoveredAddress: recoveredTransactionAddress,
+    })
   }
   return signer
+}
+
+function assertRecoveredAddress(params: {
+  reportedAddress: Address
+  recoveredAddress: Address
+}) {
+  if (params.recoveredAddress !== params.reportedAddress) {
+    throw new SignerAddressMismatchError(params)
+  }
 }

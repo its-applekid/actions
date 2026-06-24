@@ -154,6 +154,7 @@ export class WalletNamespace<
    * - `wallet`: The created SmartWallet instance
    * - `deployments`: Array of deployment results with chainId, receipt, success flag, and error
    * @throws Error if signer is not included in the signers array
+   * @throws SignerAddressMismatchError if the signer does not control its reported address
    */
   async createSmartWallet(
     params: CreateSmartWalletOptions,
@@ -170,6 +171,7 @@ export class WalletNamespace<
    * for passing to other libraries that accept a viem `LocalAccount`.
    * @param params - Configuration for the signer
    * @returns Promise resolving to a viem `LocalAccount` with the hosted wallet as the signer backend
+   * @throws SignerAddressMismatchError if the hosted signing key does not control its reported address
    */
   async createSigner(
     params: TToActionsMap[THostedProviderType],
@@ -186,6 +188,7 @@ export class WalletNamespace<
    * `LocalAccount` is accepted and provider params are a type error.
    * @param params - Provider params or a viem LocalAccount
    * @returns Promise resolving to the Actions wallet instance
+   * @throws SignerAddressMismatchError if the signing key does not control its reported address
    */
   async toActionsWallet(
     params: ToActionsWalletParam<THostedProviderType, TToActionsMap>,
@@ -219,6 +222,7 @@ export class WalletNamespace<
    * @param params.nonce - Optional nonce used during smart wallet creation
    * @returns Promise resolving to the smart wallet instance with the provided signer
    * @throws Error if neither walletAddress nor deploymentSigners provided
+   * @throws SignerAddressMismatchError if the signer does not control its reported address
    */
   async getSmartWallet(params: GetSmartWalletOptions) {
     const provider = await this.resolveProvider()

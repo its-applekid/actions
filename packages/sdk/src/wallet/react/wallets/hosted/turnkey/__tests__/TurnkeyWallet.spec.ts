@@ -31,7 +31,7 @@ vi.mock('@turnkey/viem', async () => ({
 const mockChainManager = new MockChainManager({
   supportedChains: [unichain.id],
 }) as unknown as ChainManager
-const client = createMockTurnkeyClient<TurnkeySDKClientBase>()
+const client = createMockTurnkeyClient() as TurnkeySDKClientBase
 // Resolves signWith -> real signing key, reporting ethereumAddress when given.
 const turnkeyKeys = createTurnkeyKeyRegistry()
 

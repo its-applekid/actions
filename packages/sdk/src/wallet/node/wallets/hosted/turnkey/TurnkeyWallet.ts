@@ -68,6 +68,7 @@ export class TurnkeyWallet extends EOAWallet {
   protected async performInitialization() {
     this.signer = await this.createSigner()
     this.address = this.signer.address
+    await super.performInitialization()
   }
 
   private async createSigner(): Promise<LocalAccount> {

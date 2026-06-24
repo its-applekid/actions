@@ -1,6 +1,5 @@
 import type { Address, LocalAccount } from 'viem'
 
-import { reconcileSignerAddress } from '@/wallet/core/utils/reconcileSignerAddress.js'
 import type { BaseWalletCreateOptions } from '@/wallet/core/wallets/abstract/Wallet.js'
 import { EOAWallet } from '@/wallet/core/wallets/eoa/EOAWallet.js'
 
@@ -47,6 +46,6 @@ export class LocalWallet extends EOAWallet {
    * wallet. A genuine `privateKeyToAccount` reconciles locally with no network.
    */
   protected override async performInitialization(): Promise<void> {
-    await reconcileSignerAddress(this.signer)
+    await super.performInitialization()
   }
 }

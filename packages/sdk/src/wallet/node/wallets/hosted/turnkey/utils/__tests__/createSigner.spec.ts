@@ -19,7 +19,7 @@ vi.mock('@turnkey/viem', async () => ({
 }))
 
 describe('createSigner (Node Turnkey)', () => {
-  const client = createMockTurnkeyClient<TurnkeyHttpClient>()
+  const client = createMockTurnkeyClient() as TurnkeyHttpClient
   // Resolves signWith -> real signing key, reporting ethereumAddress when given.
   const turnkeyKeys = createTurnkeyKeyRegistry()
 
@@ -95,7 +95,7 @@ describe('createSigner (Node Turnkey)', () => {
         client,
         organizationId: 'org_123',
         signWith: 'key_a',
-        ethereumAddress: '0xnotanaddress' as Address,
+        ethereumAddress: '0xnotanaddress',
       }),
     ).rejects.toBeInstanceOf(InvalidParamsError)
 
