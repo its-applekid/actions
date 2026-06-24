@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 import { type Address } from 'viem'
 import { z } from 'zod'
 
-import { errorResponse, requireAuth } from '@/helpers/errors.js'
+import { errorResponse, mapSdkError, requireAuth } from '@/helpers/errors.js'
 import {
   AddressSchema,
   Bytes32Schema,
@@ -37,6 +37,16 @@ const DripEthToWalletRequestSchema = z.object({
   }),
 })
 
+function walletErrorResponse(
+  c: Context,
+  fallbackMessage: string,
+  error: unknown,
+) {
+  const mapped = mapSdkError(error)
+  if (mapped) return errorResponse(c, mapped.message, mapped.status, error)
+  return errorResponse(c, fallbackMessage, 500, error)
+}
+
 export class WalletController {
   /**
    * GET - Retrieve wallet information by user ID
@@ -56,7 +66,7 @@ export class WalletController {
         address: wallet.address,
       } satisfies GetWalletResponse)
     } catch (error) {
-      return errorResponse(c, 'Failed to get wallet', 500, error)
+      return walletErrorResponse(c, 'Failed to get wallet', error)
     }
   }
 
@@ -75,7 +85,7 @@ export class WalletController {
       const balance = await walletService.getWalletBalance(wallet)
       return c.json({ result: balance })
     } catch (error) {
-      return errorResponse(c, 'Failed to get balance', 500, error)
+      return walletErrorResponse(c, 'Failed to get balance', error)
     }
   }
 
@@ -148,7 +158,7 @@ export class WalletController {
       const result = await walletService.mintDemoUsdcToWallet(wallet)
       return c.json(result)
     } catch (error) {
-      return errorResponse(c, 'Failed to fund wallet', 500, error)
+      return walletErrorResponse(c, 'Failed to fund wallet', error)
     }
   }
 
@@ -175,7 +185,7 @@ export class WalletController {
 
       return c.json({ result: { userOpHash: result.userOpHash } })
     } catch (error) {
-      return errorResponse(c, 'Failed to drip ETH to wallet', 500, error)
+      return walletErrorResponse(c, 'Failed to drip ETH to wallet', error)
     }
   }
 }
