@@ -183,8 +183,7 @@ describe('fetchBalances', () => {
   })
 
   it('reads native ETH on supported chains absent from the asset address map', async () => {
-    // celo is a supported chain but has no entry in ETH.address; the native
-    // balance must still be read (matching the previous unconditional fan-out).
+    // Native balance must still be read when ETH.address lacks the chain entry.
     const cm = new MockChainManager({
       supportedChains: [celo.id],
       defaultBalance: 1000000n,
