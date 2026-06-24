@@ -447,9 +447,7 @@ describe('encodeUniversalRouterSwap', () => {
   })
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Multi-hop (V4 path-based SWAP_EXACT_IN 0x07 / SWAP_EXACT_OUT 0x09)
-// ─────────────────────────────────────────────────────────────────────────────
+// Multi-hop V4 path-based SWAP_EXACT_IN / SWAP_EXACT_OUT coverage.
 
 // Decode the (actions, params[]) tuple from a V4_SWAP execute() calldata.
 function decodeV4Swap(calldata: `0x${string}`): {
@@ -573,8 +571,7 @@ describe('encodeUniversalRouterSwap — multi-hop', () => {
 
     expect(p.currencyOut.toLowerCase()).toBe(addr(DAI))
     expect(p.amountOut).toBe(99000000000000000000n)
-    // Exact-out path lists each hop's INPUT currency (V4 walks it backward):
-    // chain [USDC, WETH, DAI] → path intermediates [USDC, WETH], fees pool-aligned.
+    // Exact-out lists hop input currencies because V4 walks the path backward.
     expect(p.path.map((h) => h.intermediateCurrency.toLowerCase())).toEqual([
       addr(USDC),
       addr(WETH),
@@ -649,9 +646,7 @@ describe('encodeUniversalRouterSwap — multi-hop', () => {
   })
 
   it('throws when the path endpoints do not match the swap pair', () => {
-    // multiHop routes USDC→…→DAI, but the swap requests USDC→WETH (WETH is an
-    // intermediate, not an endpoint). Encoding must refuse rather than silently
-    // route to the wrong output currency.
+    // Refuse paths whose endpoints do not match the requested swap pair.
     expect(() =>
       encodeUniversalRouterSwap({
         amountInRaw: 100000000n,
@@ -731,8 +726,7 @@ describe('encodeUniversalRouterSwap — multi-hop', () => {
       currencyOut: string
       path: ReadonlyArray<{ intermediateCurrency: string; fee: number }>
     }
-    // Reversed chain [DAI, WETH, USDC]; exact-out lists hop INPUT currencies
-    // [DAI, WETH] with reversed pool fees [3000, 500]; currencyOut = USDC.
+    // Exact-out lists reversed hop input currencies and fees.
     expect(p.currencyOut.toLowerCase()).toBe(addr(USDC))
     expect(p.path.map((h) => h.intermediateCurrency.toLowerCase())).toEqual([
       addr(DAI),
@@ -831,8 +825,7 @@ describe('encodeUniversalRouterSwap — single-hop byte parity', () => {
     gasEstimate: 150000n,
   }
 
-  // Regression: single-hop calldata must remain byte-identical after the
-  // multi-hop refactor. Pinned values captured from the pre-refactor encoder.
+  // Single-hop calldata must remain byte-identical after the multi-hop refactor.
   it('exact-in single-hop calldata is unchanged', () => {
     const calldata = encodeUniversalRouterSwap({
       amountInRaw: 100000000n,

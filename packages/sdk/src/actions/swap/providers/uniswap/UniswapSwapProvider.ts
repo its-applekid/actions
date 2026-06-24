@@ -181,8 +181,7 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
         routerAddress: addresses.universalRouter,
         value: isNativeAsset(assetIn) ? (amountInRaw ?? 0n) : 0n,
         providerContext: {
-          // For multi-hop routes this reports the first hop's pool params only;
-          // the full per-hop breakdown lives in `route.pools`.
+          // Multi-hop providerContext reports the first hop; route.pools has all hops.
           fee: marketConfig.fee ?? marketConfig.path?.[0]?.fee,
           tickSpacing:
             marketConfig.tickSpacing ?? marketConfig.path?.[0]?.tickSpacing,

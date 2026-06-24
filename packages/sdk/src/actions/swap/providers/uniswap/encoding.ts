@@ -164,10 +164,7 @@ function resolvePathParams(
     chainId,
   ).toLowerCase()
 
-  // The configured path must connect exactly the requested pair. Without this
-  // guard a pair-match on a wider config (e.g. an intermediate asset) would
-  // silently encode a swap to the wrong currency — a wrong byte here bare-reverts
-  // on-chain or delivers the wrong token.
+  // The configured path must connect exactly the requested pair.
   const forward = inCurrency === origin && outCurrency === destination
   const reverse = inCurrency === destination && outCurrency === origin
   if (!forward && !reverse) {
@@ -360,9 +357,6 @@ async function quoteMultiHop(
   )
 
   // Separate calls per function name keep viem's arg-type inference happy.
-  // viem 2.x mis-infers a dynamic `tuple[]` arg as `never[]`; the PathKey shape
-  // is validated at encode time via EXACT_INPUT_PARAMS / EXACT_OUTPUT_PARAMS, so
-  // we cast only the `path` field while keeping the other args type-checked.
   const pathArg = path as never[]
   const quoteResult = isExactInput
     ? await publicClient.simulateContract({
