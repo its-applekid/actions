@@ -123,6 +123,18 @@ export function validateBorrowMarketIdInAnyAllowlist(
         matches: marketIdMatches,
       })
     ) {
+      const blocked = findMatchingConfig({
+        configs: provider.config.marketBlocklist,
+        target: marketId,
+        matches: marketIdMatches,
+      })
+      if (blocked) {
+        throw new MarketNotAllowedError({
+          address: marketId.marketId,
+          chainId: marketId.chainId,
+          reason: 'Market is on the marketBlocklist',
+        })
+      }
       return
     }
   }

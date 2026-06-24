@@ -13,6 +13,7 @@ import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
   ChainNotSupportedError,
   InvalidParamsError,
+  MarketNotAllowedError,
   ProviderNotConfiguredError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
@@ -219,6 +220,19 @@ describe('WalletBorrowNamespace - quote validation', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ProviderNotConfiguredError)
+  })
+
+  it('throws MarketNotAllowedError for a blocklisted pre-built quote market', async () => {
+    const { wallet } = makeWallet()
+    const provider = new MockBorrowProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    const namespace = new WalletBorrowNamespace({ morpho: provider }, wallet)
+
+    await expect(namespace.openPosition(makeQuote())).rejects.toBeInstanceOf(
+      MarketNotAllowedError,
+    )
   })
 
   it('throws InvalidParamsError when quote.action does not match the called method', async () => {
