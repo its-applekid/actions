@@ -240,8 +240,7 @@ export abstract class BorrowProvider<
         ? undefined
         : (market) => market.borrowAsset === params.borrowAsset,
     ])
-    // A caller-supplied `markets[]` override can narrow the configured
-    // allowlist, but normal chain/asset filters still apply afterward.
+    // Caller-supplied markets only narrow the allowlist; normal filters still apply.
     return this._getMarkets({
       ...params,
       markets: filteredMarkets,

@@ -88,8 +88,7 @@ export abstract class LendProvider<
 
     this.validateMarketAllowed(params.marketId)
 
-    // Mirror closePosition's asset guard before building any approval or
-    // deposit, so a mismatched asset can never reach signed approve() calldata.
+    // Mirror closePosition's asset guard before building approvals or deposits.
     const market = await this.getMarket({
       address: params.marketId.address,
       chainId: params.marketId.chainId,
@@ -157,8 +156,7 @@ export abstract class LendProvider<
   async getMarkets(params: GetLendMarketsParams = {}): Promise<LendMarket[]> {
     if (params.chainId !== undefined) this.assertChainSupported(params.chainId)
 
-    // A caller-supplied `markets[]` override can narrow the configured
-    // allowlist, but normal chain/asset filters still apply afterward.
+    // Caller-supplied markets only narrow the allowlist; normal filters still apply.
     const candidates = params.markets ?? this._config.marketAllowlist ?? []
     const allowedMarkets = selectAllowedLendMarkets(candidates, this._config)
     const filteredMarkets = this.filterMarketConfigs(
@@ -254,8 +252,7 @@ export abstract class LendProvider<
   protected validateMarketAllowed(marketId: LendMarketId): void {
     this.assertChainSupported(marketId.chainId)
 
-    // Blocklist takes precedence: a blocklisted market is rejected even when it
-    // also appears in the allowlist.
+    // Blocklist takes precedence over allowlist entries.
     if (this._config.marketBlocklist?.length) {
       const blocked = findMatchingConfig({
         configs: this._config.marketBlocklist,

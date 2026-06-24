@@ -13,9 +13,7 @@ import type {
 } from '@/types/lend/index.js'
 import { validateChainSupported } from '@/utils/validation.js'
 
-// Address the MockLendProvider's `createMockMarket` reports as the market
-// underlying for every chain. The new open-path asset guard compares the
-// caller asset against this, so a matching open must use it.
+// MockLendProvider reports this market underlying on every chain.
 const MARKET_ASSET = '0x0000000000000000000000000000000000000001' as Address
 const VAULT = '0x2222222222222222222222222222222222222222' as Address
 const WALLET = '0x3333333333333333333333333333333333333333' as Address
@@ -200,9 +198,7 @@ describe('LendProvider', () => {
   })
 
   describe('approvalMode resolution', () => {
-    // The caller asset must match the market's resolved underlying
-    // (MARKET_ASSET) now that openPosition guards the asset, and the market
-    // must be allowlisted now that the allowlist fails closed.
+    // The caller asset must match the resolved, allowlisted market underlying.
     const mockAsset = {
       address: {
         84532: MARKET_ASSET,

@@ -524,10 +524,9 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
     expect(noMatch).toHaveLength(0)
   })
 
-  it('getMarkets does not surface a caller-supplied market outside the allowlist (F016)', async () => {
+  it('getMarkets does not surface a caller-supplied market outside the allowlist', async () => {
     provider = makeProvider({ marketAllowlist: [market] })
-    // `otherMarket` is a fully-formed config a caller could fabricate to surface
-    // an arbitrary reserve; the override must intersect with the allowlist.
+    // Caller-supplied markets must intersect with the allowlist.
     const markets = await provider.getMarkets({ markets: [otherMarket] })
     expect(markets).toEqual([])
   })

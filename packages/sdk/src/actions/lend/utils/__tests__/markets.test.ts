@@ -15,8 +15,7 @@ import type { LendMarket, LendMarketConfig } from '@/types/lend/index.js'
 const CHAIN = 84532 as SupportedChainId
 const OTHER_CHAIN = 8453 as SupportedChainId
 
-// USDC on Base, in EIP-55 checksummed and all-lowercase form. The two strings
-// address the same token; a case-sensitive compare would wrongly reject one.
+// Same Base USDC address in checksummed and lowercase form.
 const USDC_CHECKSUM = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as Address
 const USDC_LOWER = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' as Address
 const WETH = '0x4200000000000000000000000000000000000006' as Address
@@ -56,9 +55,7 @@ function makeMarket(
 
 describe('isMarketAsset / validateMarketAsset', () => {
   it('rejects an asset with no address configured for the market chain even when the market underlying is also unconfigured there (closes the undefined === undefined hole)', () => {
-    // Both the market underlying and the provided asset only know about
-    // OTHER_CHAIN, so each resolves to `undefined` on the market's chain. Raw
-    // `===` treats `undefined === undefined` as a match; the guard must not.
+    // Two missing chain addresses must not compare equal via undefined.
     const market = makeMarket(makeAsset({ [OTHER_CHAIN]: USDC_LOWER }), CHAIN)
     const asset = makeAsset({ [OTHER_CHAIN]: USDC_LOWER })
 

@@ -204,9 +204,7 @@ export class MockLendProvider extends LendProvider<LendProviderConfig> {
   protected async _getMarkets(
     params: GetLendMarketsParams,
   ): Promise<LendMarket[]> {
-    // Echo the resolved markets the base class passes down so callers of the
-    // real `getMarkets` (e.g. allowlist-intersection tests) observe exactly
-    // which markets survived filtering, rather than a fixed stub list.
+    // Echo resolved markets so allowlist-intersection tests observe the survivors.
     return Promise.all(
       (params.markets ?? []).map((market) =>
         this.createMockMarket({

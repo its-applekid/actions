@@ -87,7 +87,7 @@ const callGetMarkets = (
   >
 
 describe('LendProvider market access safety', () => {
-  describe('marketBlocklist enforcement (F010)', () => {
+  describe('marketBlocklist enforcement', () => {
     const marketId: LendMarketId = { address: VAULT, chainId: 84532 }
     const blockedProvider = () =>
       new MockLendProvider({
@@ -129,7 +129,7 @@ describe('LendProvider market access safety', () => {
     })
   })
 
-  describe('empty/undefined allowlist fails closed (F081)', () => {
+  describe('empty/undefined allowlist fails closed', () => {
     const marketId: LendMarketId = { address: VAULT, chainId: 84532 }
 
     it('rejects openPosition when no allowlist is configured', async () => {
