@@ -357,9 +357,7 @@ describe('encodeUniversalRouterSwap', () => {
     // bare-reverted on pool lookup. Correct codes:
     //   0x06 SWAP_EXACT_IN_SINGLE
     //   0x08 SWAP_EXACT_OUT_SINGLE
-    //   0x0c SETTLE_ALL
-    //   0x0e TAKE: routes output to an explicit recipient (was 0x0f TAKE_ALL,
-    //        which credits msg.sender and ignored the advertised recipient).
+    //   0x0c SETTLE_ALL; 0x0e TAKE routes output to the recipient.
     const decodeActions = (calldata: `0x${string}`): `0x${string}` => {
       const { args } = decodeFunctionData({
         abi: UNIVERSAL_ROUTER_ABI,
@@ -474,7 +472,7 @@ describe('encodeUniversalRouterSwap', () => {
   })
 })
 
-describe('V4 recipient honoring (F046)', () => {
+describe('V4 recipient honoring', () => {
   const baseQuote = {
     price: '0.005',
     priceInverse: '200',
@@ -539,8 +537,7 @@ describe('V4 recipient honoring (F046)', () => {
 
   it('routes to a non-self recipient rather than dropping to msg.sender', () => {
     const calldata = encode(OTHER_RECIPIENT)
-    // Decoding the bytes (not asserting against itself) recovers the exact
-    // recipient, proving output is no longer silently sent to msg.sender.
+    // Decoding the bytes recovers the exact output recipient.
     expect(decodeTakeRecipient(calldata)).toBe(OTHER_RECIPIENT)
   })
 

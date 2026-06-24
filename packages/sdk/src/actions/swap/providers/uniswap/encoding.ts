@@ -282,10 +282,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
     tickSpacing,
   } = params
 
-  // Honor the advertised recipient: the swap output is routed to it via the
-  // V4 TAKE action below. Validate at the encoder seam so a malformed or
-  // mis-checksummed recipient is rejected before it is signed, rather than
-  // baked verbatim into calldata (defense-in-depth alongside upstream guards).
+  // Validate before signing so malformed recipients never enter calldata.
   const recipient = assertChecksummedRecipient(params.recipient)
 
   const { tokenIn, tokenOut, zeroForOne, poolKey } = resolvePoolParams(
