@@ -10,7 +10,10 @@ import {
   createSigningAccount,
   getRandomAddress,
 } from '@/__mocks__/utils.js'
-import { SignerAddressMismatchError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  SignerAddressMismatchError,
+} from '@/core/error/errors.js'
 import { createSigner } from '@/wallet/react/wallets/hosted/dynamic/utils/createSigner.js'
 
 vi.mock('@dynamic-labs/ethereum', async () => ({
@@ -118,6 +121,6 @@ describe('createSigner (React Dynamic)', () => {
 
     await expect(
       createSigner({ wallet: {} as unknown as Wallet }),
-    ).rejects.toThrow('Wallet not connected or not EVM compatible')
+    ).rejects.toBeInstanceOf(InvalidParamsError)
   })
 })

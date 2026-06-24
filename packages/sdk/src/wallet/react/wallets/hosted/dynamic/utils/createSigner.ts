@@ -28,7 +28,7 @@ function requireDynamicRawMessageSigner(
 ): DynamicRawMessageSigner {
   if (isDynamicRawMessageSigner(connector)) return connector
   throw new InvalidParamsError({
-    param: 'dynamicWallet.connector',
+    param: 'params.wallet.connector',
     expected: 'Dynamic connector with signRawMessage support',
   })
 }
@@ -45,17 +45,20 @@ function stripHexPrefix(value: Hex): string {
  * address is validated, normalized, and reconciled against the connector signing
  * backend, so a wallet whose reported address diverges from its key fails at
  * construction instead of silently signing for the wrong account.
- * @param params.dynamicWallet - Dynamic wallet instance
+ * @param params.wallet - Dynamic wallet instance.
  * @returns Promise resolving to a reconciled LocalAccount configured for signing operations
  * @throws SignerAddressMismatchError if the signing backend does not control the reported address
- * @throws Error if wallet retrieval fails or signing operations are not supported
+ * @throws InvalidParamsError if the wallet is not EVM compatible or cannot sign raw messages
  */
 export async function createSigner(
   params: DynamicHostedWalletToActionsWalletOptions,
 ): Promise<LocalAccount> {
   const { wallet } = params
   if (!isEthereumWallet(wallet)) {
-    throw new Error('Wallet not connected or not EVM compatible')
+    throw new InvalidParamsError({
+      param: 'params.wallet',
+      expected: 'Connected EVM-compatible Dynamic wallet',
+    })
   }
   const walletClient = await wallet.getWalletClient()
   const connector = requireDynamicRawMessageSigner(wallet.connector)

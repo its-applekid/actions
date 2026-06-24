@@ -8,7 +8,10 @@ import {
   createSigningAccount,
   getRandomAddress,
 } from '@/__mocks__/utils.js'
-import { SignerAddressMismatchError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  SignerAddressMismatchError,
+} from '@/core/error/errors.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { DynamicHostedWalletToActionsWalletOptions } from '@/wallet/react/providers/hosted/types/index.js'
@@ -178,17 +181,13 @@ describe('DynamicWallet', () => {
     const dynamic = createMockDynamicWallet()
     vi.mocked(isEthereumWallet).mockReturnValueOnce(false)
 
-    const error = await DynamicWallet.create({
-      dynamicWallet: dynamic,
-      chainManager: mockChainManager,
-      actionProviders: {},
-      actionSettings: {},
-    }).catch((e: unknown) => e)
-
-    expect((error as Error).message).toBe('Failed to initialize wallet')
-    expect((error as Error).cause).toBeInstanceOf(Error)
-    expect(((error as Error).cause as Error).message).toBe(
-      'Wallet not connected or not EVM compatible',
-    )
+    await expect(
+      DynamicWallet.create({
+        dynamicWallet: dynamic,
+        chainManager: mockChainManager,
+        actionProviders: {},
+        actionSettings: {},
+      }),
+    ).rejects.toBeInstanceOf(InvalidParamsError)
   })
 })
