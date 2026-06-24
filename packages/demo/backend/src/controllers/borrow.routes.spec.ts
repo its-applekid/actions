@@ -204,10 +204,7 @@ describe('borrow routes', () => {
     })
 
     it('maps non-borrow paths (lend) through the same global onError', async () => {
-      // Lend no longer wraps its controller in a per-route try/catch; thrown
-      // SDK errors propagate to the global onError and are mapped identically
-      // to borrow's. A MarketNotAllowedError surfaces as a 403, not an opaque
-      // 500.
+      // Lend SDK errors should map through global onError just like borrow.
       const { getMarkets: lendGetMarkets } = await import('@/services/lend.js')
       vi.mocked(lendGetMarkets).mockRejectedValue(
         new MarketNotAllowedError({
