@@ -81,10 +81,7 @@ export function buildFrontendWalletOperations(
     openPosition: async (params) => wallet.lend!.openPosition(params),
     closePosition: async (params) => wallet.lend!.closePosition(params),
     executeSwap: async (quote) => {
-      // `quote` is typed `PriceQuote` by the shared EarnOperations interface,
-      // but this path requires the executable `SwapQuote` returned by this
-      // operations' own `getSwapQuote` (which calls `wallet.swap.getQuote`).
-      // Passing an arbitrary price-only quote would throw at execute().
+      // This path requires the executable SwapQuote returned by wallet.swap.getQuote.
       const receipt = await wallet.swap!.execute(quote)
       const txReceipt = receipt.receipt
       const blockExplorerUrl = getBlockExplorerUrl(

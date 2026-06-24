@@ -213,8 +213,7 @@ function stateMulticallResult(
     allowance?: bigint
   } = {},
 ) {
-  // The state-with-allowance multicall returns 5 entries: position, market,
-  // price, rateAtTarget, allowance.
+  // State-with-allowance returns position, market, price, rate, and allowance.
   return [
     positionTuple({
       collateral: opts.collateral ?? 0n,

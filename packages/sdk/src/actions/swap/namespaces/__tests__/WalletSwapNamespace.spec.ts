@@ -240,10 +240,7 @@ describe('WalletSwapNamespace', () => {
       const actions = new ActionsSwapNamespace({ uniswap: provider })
       const namespace = new WalletSwapNamespace({ uniswap: provider }, wallet)
 
-      // A PriceQuote from actions.swap.getQuote carries quotedAt (so execute
-      // routes it down the pre-built-quote path) but has no recipient. It must
-      // fail loudly rather than silently re-quoting to the wallet — re-quote
-      // via wallet.swap.getQuote to execute.
+      // A price-only quote must fail loudly instead of silently re-quoting.
       const priceQuote = await actions.getQuote({
         assetIn: USDC,
         assetOut: ETH,

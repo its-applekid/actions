@@ -49,9 +49,7 @@ describe('BaseSwapNamespace', () => {
         chainId: 84532 as SupportedChainId,
       })
 
-      // PriceQuote is intentionally un-executable: dropping recipient prevents
-      // the Universal Router msg.sender sentinel (address(1)) from leaking into
-      // a public field that consumers would trust for display/accounting.
+      // PriceQuote must not expose sentinel recipient or executable fields.
       expect(result).not.toHaveProperty('execution')
       expect(result).not.toHaveProperty('recipient')
       expect(result).not.toHaveProperty('approvalMode')
@@ -97,8 +95,7 @@ describe('BaseSwapNamespace', () => {
 
       // Should pick velodrome because 1.8 > 1.2 (higher amountOut)
       expect(result.provider).toBe('velodrome')
-      // The price-routing branch returns through toPriceQuote too — still no
-      // sentinel recipient leak.
+      // Price routing still strips executable fields through toPriceQuote.
       expect(result).not.toHaveProperty('recipient')
       expect(result).not.toHaveProperty('execution')
     })
@@ -207,8 +204,7 @@ describe('BaseSwapNamespace', () => {
       expect(quotes).toHaveLength(2)
       expect(quotes[0].provider).toBe('velodrome')
       expect(quotes[1].provider).toBe('uniswap')
-      // The plural path strips through the same toPriceQuote — no element may
-      // leak the sentinel recipient or execution data.
+      // The plural path must strip executable fields from every quote.
       for (const quote of quotes) {
         expect(quote).not.toHaveProperty('execution')
         expect(quote).not.toHaveProperty('recipient')
