@@ -1,11 +1,12 @@
-import { mainnet, optimismSepolia } from 'viem/chains'
+import { optimismSepolia } from 'viem/chains'
 import type { MockInstance } from 'vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { runEnsResolve } from '@/commands/actions/ens/resolve.js'
-import * as baseCtx from '@/context/baseContext.js'
 import { CliError } from '@/output/errors.js'
 import { setJsonMode } from '@/output/mode.js'
+
+import { mockEnsActions } from './ensTestUtils.js'
 
 beforeEach(() => setJsonMode(true))
 afterEach(() => setJsonMode(false))
@@ -23,21 +24,13 @@ describe('runEnsResolve', () => {
     vi.restoreAllMocks()
   })
 
-  const mockEns = (
-    getAddress: (input: string) => Promise<string>,
-    chains: Array<{ chainId: number }> = [{ chainId: mainnet.id }],
-  ) => {
-    vi.spyOn(baseCtx, 'baseContext').mockReturnValue({
-      config: { chains } as never,
-      actions: { ens: { getAddress } } as never,
-    })
-  }
-
   it('resolves a name and emits { name, address }', async () => {
     const captured: string[] = []
-    mockEns(async (input) => {
-      captured.push(input)
-      return VITALIK
+    mockEnsActions({
+      getAddress: async (input: string) => {
+        captured.push(input)
+        return VITALIK
+      },
     })
     await runEnsResolve('vitalik.eth')
     const body = JSON.parse(String(writeSpy.mock.calls[0]?.[0]))
@@ -46,7 +39,9 @@ describe('runEnsResolve', () => {
   })
 
   it('rejects with CliError(config) when mainnet is not configured', async () => {
-    mockEns(async () => VITALIK, [{ chainId: optimismSepolia.id }])
+    mockEnsActions({ getAddress: async () => VITALIK }, [
+      { chainId: optimismSepolia.id },
+    ])
     try {
       await runEnsResolve('vitalik.eth')
       throw new Error('did not throw')
@@ -57,7 +52,7 @@ describe('runEnsResolve', () => {
   })
 
   it('rejects a non-name input with CliError(validation)', async () => {
-    mockEns(async () => VITALIK)
+    mockEnsActions({ getAddress: async () => VITALIK })
     try {
       await runEnsResolve(VITALIK)
       throw new Error('did not throw')
@@ -69,7 +64,9 @@ describe('runEnsResolve', () => {
 
   it('checks mainnet config before input shape (config wins over validation)', async () => {
     // Missing mainnet config must win before name-shape validation.
-    mockEns(async () => VITALIK, [{ chainId: optimismSepolia.id }])
+    mockEnsActions({ getAddress: async () => VITALIK }, [
+      { chainId: optimismSepolia.id },
+    ])
     try {
       await runEnsResolve('notaname')
       throw new Error('did not throw')
@@ -80,8 +77,10 @@ describe('runEnsResolve', () => {
   })
 
   it('maps RPC failures to CliError(network)', async () => {
-    mockEns(async () => {
-      throw new Error('fetch failed')
+    mockEnsActions({
+      getAddress: async () => {
+        throw new Error('fetch failed')
+      },
     })
     try {
       await runEnsResolve('vitalik.eth')

@@ -1,12 +1,13 @@
 import type { EnsInfo } from '@eth-optimism/actions-sdk'
-import { mainnet, optimismSepolia } from 'viem/chains'
+import { optimismSepolia } from 'viem/chains'
 import type { MockInstance } from 'vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { runEnsInfo } from '@/commands/actions/ens/info.js'
-import * as baseCtx from '@/context/baseContext.js'
 import { CliError } from '@/output/errors.js'
 import { setJsonMode } from '@/output/mode.js'
+
+import { mockEnsActions } from './ensTestUtils.js'
 
 beforeEach(() => setJsonMode(true))
 afterEach(() => setJsonMode(false))
@@ -37,16 +38,6 @@ describe('runEnsInfo', () => {
     vi.restoreAllMocks()
   })
 
-  const mockEns = (
-    getInfo: (input: string) => Promise<typeof NULL_INFO>,
-    chains: Array<{ chainId: number }> = [{ chainId: mainnet.id }],
-  ) => {
-    vi.spyOn(baseCtx, 'baseContext').mockReturnValue({
-      config: { chains } as never,
-      actions: { ens: { getInfo } } as never,
-    })
-  }
-
   it('emits the SDK EnsInfo shape verbatim for a name', async () => {
     const captured: string[] = []
     const profile = {
@@ -54,9 +45,11 @@ describe('runEnsInfo', () => {
       display: 'vitalik.eth',
       twitter: 'VitalikButerin',
     }
-    mockEns(async (input) => {
-      captured.push(input)
-      return profile
+    mockEnsActions({
+      getInfo: async (input: string) => {
+        captured.push(input)
+        return profile
+      },
     })
     await runEnsInfo('vitalik.eth')
     const body = JSON.parse(String(writeSpy.mock.calls[0]?.[0]))
@@ -66,16 +59,20 @@ describe('runEnsInfo', () => {
 
   it('accepts a checksummed address input', async () => {
     const captured: string[] = []
-    mockEns(async (input) => {
-      captured.push(input)
-      return NULL_INFO
+    mockEnsActions({
+      getInfo: async (input: string) => {
+        captured.push(input)
+        return NULL_INFO
+      },
     })
     await runEnsInfo(VITALIK.toLowerCase())
     expect(captured).toEqual([VITALIK])
   })
 
   it('rejects with CliError(config) when mainnet is not configured', async () => {
-    mockEns(async () => NULL_INFO, [{ chainId: optimismSepolia.id }])
+    mockEnsActions({ getInfo: async () => NULL_INFO }, [
+      { chainId: optimismSepolia.id },
+    ])
     try {
       await runEnsInfo('vitalik.eth')
       throw new Error('did not throw')
@@ -86,7 +83,7 @@ describe('runEnsInfo', () => {
   })
 
   it('rejects an input that is neither name nor address with CliError(validation)', async () => {
-    mockEns(async () => NULL_INFO)
+    mockEnsActions({ getInfo: async () => NULL_INFO })
     try {
       await runEnsInfo('notaname')
       throw new Error('did not throw')
@@ -98,7 +95,9 @@ describe('runEnsInfo', () => {
 
   it('checks mainnet config before input shape (config wins over validation)', async () => {
     // Missing mainnet config must win before unreachable input validation.
-    mockEns(async () => NULL_INFO, [{ chainId: optimismSepolia.id }])
+    mockEnsActions({ getInfo: async () => NULL_INFO }, [
+      { chainId: optimismSepolia.id },
+    ])
     try {
       await runEnsInfo('notaname')
       throw new Error('did not throw')
@@ -109,8 +108,10 @@ describe('runEnsInfo', () => {
   })
 
   it('maps RPC failures to CliError(network)', async () => {
-    mockEns(async () => {
-      throw new Error('fetch failed')
+    mockEnsActions({
+      getInfo: async () => {
+        throw new Error('fetch failed')
+      },
     })
     try {
       await runEnsInfo('vitalik.eth')
