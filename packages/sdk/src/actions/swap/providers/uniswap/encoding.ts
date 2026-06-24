@@ -199,6 +199,8 @@ export async function getQuote(params: GetQuoteParams): Promise<SwapPrice> {
 
 export interface EncodeSwapParams {
   amountInRaw?: bigint
+  /** Exact-output maximum input amount after slippage. */
+  amountInMaximumRaw?: bigint
   amountOutRaw?: bigint
   assetIn: Asset
   assetOut: Asset
@@ -220,6 +222,12 @@ export interface UniversalRouterSwapSummary {
   currencyOut: Address
   settleCurrency: Address
   takeCurrency: Address
+  inputAmountRaw: bigint
+  outputAmountRaw: bigint
+  settleAmountRaw: bigint
+  takeAmountRaw: bigint
+  amountInMaximumRaw?: bigint
+  amountOutMinimumRaw?: bigint
   fee: number
   tickSpacing: number
   hooks: Address
@@ -233,6 +241,7 @@ const SWAP_EXACT_IN_SINGLE = 0x06
 const SWAP_EXACT_OUT_SINGLE = 0x08
 const SETTLE_ALL = 0x0c
 const TAKE = 0x0e
+const BPS_DENOMINATOR = 10000n
 
 /**
  * V4 OPEN_DELTA sentinel for the TAKE action's `amount`: take the full positive
@@ -241,6 +250,20 @@ const TAKE = 0x0e
  * @see https://github.com/Uniswap/v4-periphery/blob/main/src/libraries/ActionConstants.sol
  */
 const OPEN_DELTA = 0n
+
+/**
+ * Calculate the executable max input for exact-output V4 swaps.
+ * @param amountInRaw - Quoted input amount before slippage
+ * @param slippage - Slippage tolerance as a decimal
+ * @returns Slippage-expanded maximum input amount
+ */
+export function calculateExactOutputAmountInMaximumRaw(
+  amountInRaw: bigint,
+  slippage: number,
+): bigint {
+  const slippageBps = BigInt(Math.round(slippage * Number(BPS_DENOMINATOR)))
+  return amountInRaw + (amountInRaw * slippageBps) / BPS_DENOMINATOR
+}
 
 /**
  * Encode Universal Router V4 swap calldata
@@ -300,8 +323,8 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
     ]
   } else {
     const maxAmountIn =
-      quote.amountInRaw +
-      (quote.amountInRaw * BigInt(Math.round(slippage * 10000))) / 10000n
+      params.amountInMaximumRaw ??
+      calculateExactOutputAmountInMaximumRaw(quote.amountInRaw, slippage)
 
     actions =
       `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
@@ -391,24 +414,24 @@ export function decodeUniversalRouterSwapSummary(
         })
       }
 
-      const [swapParams] =
-        parsedActions[0] === SWAP_EXACT_IN_SINGLE
-          ? decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, actionParams[0])
-          : decodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, actionParams[0])
-      const [settleCurrency] = decodeAbiParameters(
+      const decodedSwap = decodeSwapActionParams(
+        parsedActions[0],
+        actionParams[0],
+      )
+      const [settleCurrency, settleAmountRaw] = decodeAbiParameters(
         CURRENCY_AMOUNT_PARAMS,
         actionParams[1],
       )
-      const [takeCurrency, recipient] = decodeAbiParameters(
+      const [takeCurrency, recipient, takeAmountRaw] = decodeAbiParameters(
         TAKE_PARAMS,
         actionParams[2],
       )
-      const currencyIn = swapParams.zeroForOne
-        ? swapParams.poolKey.currency0
-        : swapParams.poolKey.currency1
-      const currencyOut = swapParams.zeroForOne
-        ? swapParams.poolKey.currency1
-        : swapParams.poolKey.currency0
+      const currencyIn = decodedSwap.zeroForOne
+        ? decodedSwap.poolKey.currency0
+        : decodedSwap.poolKey.currency1
+      const currencyOut = decodedSwap.zeroForOne
+        ? decodedSwap.poolKey.currency1
+        : decodedSwap.poolKey.currency0
 
       return {
         recipient,
@@ -416,12 +439,49 @@ export function decodeUniversalRouterSwapSummary(
         currencyOut,
         settleCurrency,
         takeCurrency,
-        fee: swapParams.poolKey.fee,
-        tickSpacing: swapParams.poolKey.tickSpacing,
-        hooks: swapParams.poolKey.hooks,
+        inputAmountRaw: decodedSwap.inputAmountRaw,
+        outputAmountRaw: decodedSwap.outputAmountRaw,
+        settleAmountRaw,
+        takeAmountRaw,
+        amountInMaximumRaw: decodedSwap.amountInMaximumRaw,
+        amountOutMinimumRaw: decodedSwap.amountOutMinimumRaw,
+        fee: decodedSwap.poolKey.fee,
+        tickSpacing: decodedSwap.poolKey.tickSpacing,
+        hooks: decodedSwap.poolKey.hooks,
       }
     },
   })
+}
+
+function decodeSwapActionParams(
+  action: number,
+  params: Hex,
+): {
+  poolKey: ResolvedPoolParams['poolKey']
+  zeroForOne: boolean
+  inputAmountRaw: bigint
+  outputAmountRaw: bigint
+  amountInMaximumRaw?: bigint
+  amountOutMinimumRaw?: bigint
+} {
+  if (action === SWAP_EXACT_IN_SINGLE) {
+    const [swapParams] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, params)
+    return {
+      poolKey: swapParams.poolKey,
+      zeroForOne: swapParams.zeroForOne,
+      inputAmountRaw: swapParams.amountIn,
+      outputAmountRaw: swapParams.amountOutMinimum,
+      amountOutMinimumRaw: swapParams.amountOutMinimum,
+    }
+  }
+  const [swapParams] = decodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, params)
+  return {
+    poolKey: swapParams.poolKey,
+    zeroForOne: swapParams.zeroForOne,
+    inputAmountRaw: swapParams.amountInMaximum,
+    outputAmountRaw: swapParams.amountOut,
+    amountInMaximumRaw: swapParams.amountInMaximum,
+  }
 }
 
 function validateV4Actions(

@@ -13,6 +13,7 @@ import {
   getUniswapAddresses,
 } from '@/actions/swap/providers/uniswap/addresses.js'
 import {
+  calculateExactOutputAmountInMaximumRaw,
   decodeUniversalRouterSwapSummary,
   encodeUniversalRouterSwap,
   getQuote,
@@ -154,11 +155,12 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
     const { slippage, now, deadline, recipient, amountInRaw } =
       this.resolveQuoteDefaults(params)
     const amountOutRaw = parseAssetAmount(assetOut, params.amountOut)
+    const isExactOutput = amountOutRaw !== undefined
 
     const quote = await getQuote({
       assetIn,
       assetOut,
-      amountInRaw: amountOutRaw ? undefined : amountInRaw,
+      amountInRaw: isExactOutput ? undefined : amountInRaw,
       amountOutRaw,
       chainId,
       publicClient,
@@ -168,8 +170,17 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       tickSpacing: marketConfig.tickSpacing,
     })
 
+    const finalAmountInRaw = isExactOutput
+      ? calculateExactOutputAmountInMaximumRaw(quote.amountInRaw, slippage)
+      : amountInRaw
+    const finalAmountIn = parseFloat(
+      formatUnits(finalAmountInRaw, assetIn.metadata.decimals),
+    )
+    const amountInMaximumRaw = isExactOutput ? finalAmountInRaw : undefined
+
     const swapCalldata = encodeUniversalRouterSwap({
-      amountInRaw: amountOutRaw ? undefined : amountInRaw,
+      amountInRaw: isExactOutput ? undefined : amountInRaw,
+      amountInMaximumRaw,
       amountOutRaw,
       assetIn,
       assetOut,
@@ -183,8 +194,6 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       tickSpacing: marketConfig.tickSpacing,
     })
 
-    const finalAmountInRaw = amountOutRaw ? quote.amountInRaw : amountInRaw
-
     const { amountOutMinRaw, amountOutMin } = this.computeSlippageBounds(
       quote.amountOutRaw,
       slippage,
@@ -195,14 +204,14 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       assetIn,
       assetOut,
       chainId,
-      amountIn: quote.amountIn,
+      amountIn: finalAmountIn,
       amountInRaw: finalAmountInRaw,
       amountOut: quote.amountOut,
       amountOutRaw: quote.amountOutRaw,
       amountOutMin,
       amountOutMinRaw,
-      price: quote.amountOut / quote.amountIn,
-      priceInverse: quote.amountIn / quote.amountOut,
+      price: quote.amountOut / finalAmountIn,
+      priceInverse: finalAmountIn / quote.amountOut,
       priceImpact: quote.priceImpact,
       route: quote.route,
       execution: {
@@ -303,6 +312,35 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       expected: expectedOut,
       received: decoded.takeCurrency,
     })
+    assertQuoteExecutionValue({
+      field: 'swapCalldata.inputAmountRaw',
+      expected: quote.amountInRaw,
+      received: decoded.inputAmountRaw,
+    })
+    assertQuoteExecutionValue({
+      field: 'swapCalldata.settleAmountRaw',
+      expected: quote.amountInRaw,
+      received: decoded.settleAmountRaw,
+    })
+    if (decoded.amountInMaximumRaw !== undefined) {
+      assertQuoteExecutionValue({
+        field: 'swapCalldata.amountInMaximumRaw',
+        expected: quote.amountInRaw,
+        received: decoded.amountInMaximumRaw,
+      })
+      assertQuoteExecutionValue({
+        field: 'swapCalldata.outputAmountRaw',
+        expected: quote.amountOutRaw,
+        received: decoded.outputAmountRaw,
+      })
+    }
+    if (decoded.amountOutMinimumRaw !== undefined) {
+      assertQuoteExecutionValue({
+        field: 'swapCalldata.amountOutMinimumRaw',
+        expected: quote.amountOutMinRaw,
+        received: decoded.amountOutMinimumRaw,
+      })
+    }
     assertQuoteExecutionField({
       field: 'swapCalldata.fee',
       expected: market.fee,

@@ -1,9 +1,12 @@
-import type { Address, PublicClient } from 'viem'
+import { type Address, decodeFunctionData, type PublicClient } from 'viem'
 import { baseSepolia } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
 import { MockWETHAsset } from '@/__mocks__/MockAssets.js'
-import { decodeUniversalRouterRecipient } from '@/actions/swap/providers/uniswap/encoding.js'
+import {
+  decodeUniversalRouterRecipient,
+  decodeUniversalRouterSwapSummary,
+} from '@/actions/swap/providers/uniswap/encoding.js'
 import type { UniswapSwapProviderConfig } from '@/actions/swap/providers/uniswap/types.js'
 import { UniswapSwapProvider } from '@/actions/swap/providers/uniswap/UniswapSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
@@ -14,8 +17,11 @@ import {
 } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { Asset } from '@/types/asset.js'
+import { PERMIT2_ABI } from '@/utils/abi/permit2.js'
 
 const CHAIN_ID = baseSepolia.id as SupportedChainId
+const QUOTED_EXACT_OUTPUT_INPUT_RAW = 500000000000000000n
+const EXACT_OUTPUT_INPUT_MAX_RAW = 502500000000000000n
 
 const USDC: Asset = {
   type: 'erc20',
@@ -33,10 +39,16 @@ const OP: Asset = {
   metadata: { name: 'Optimism', symbol: 'OP', decimals: 18 },
 }
 
+const ETH: Asset = {
+  type: 'native',
+  address: { [CHAIN_ID]: 'native' },
+  metadata: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+}
+
 function createMockChainManager(): ChainManager {
   const mockPublicClient = {
     simulateContract: vi.fn().mockResolvedValue({
-      result: [500000000000000000n, 150000n],
+      result: [QUOTED_EXACT_OUTPUT_INPUT_RAW, 150000n],
     }),
     readContract: vi
       .fn()
@@ -72,6 +84,16 @@ function createProvider(
     ...configOverrides,
   }
   return new UniswapSwapProvider(config, chainManager)
+}
+
+function decodePermit2ApprovalAmount(data: `0x${string}`): bigint {
+  const decoded = decodeFunctionData({ abi: PERMIT2_ABI, data })
+  if (decoded.functionName !== 'approve') {
+    throw new Error(
+      `Expected Permit2 approve, received ${decoded.functionName}`,
+    )
+  }
+  return decoded.args[2]
 }
 
 describe('UniswapSwapProvider', () => {
@@ -236,6 +258,66 @@ describe('UniswapSwapProvider', () => {
           execution: { ...quote.execution, swapCalldata: '0x1234' as const },
         }),
       ).rejects.toBeInstanceOf(InvalidParamsError)
+    })
+
+    it('uses the exact-output max input for ERC20 calldata and Permit2 approval', async () => {
+      const provider = createProvider()
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountOut: 0.5,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      expect(quote.amountInRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(quote.execution.value).toBe(0n)
+
+      const decoded = decodeUniversalRouterSwapSummary(
+        quote.execution.swapCalldata,
+      )
+      expect(decoded.amountInMaximumRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(decoded.settleAmountRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+
+      const result = await provider.execute(quote)
+      expect(
+        decodePermit2ApprovalAmount(
+          result.transactionData.permit2Approval!.data,
+        ),
+      ).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+    })
+
+    it('uses the exact-output max input for native value and calldata', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          { assets: [ETH, OP], fee: 100, tickSpacing: 2, chainId: CHAIN_ID },
+        ],
+      })
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: ETH,
+        assetOut: OP,
+        amountOut: 0.5,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      expect(quote.amountInRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(quote.execution.value).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+
+      const decoded = decodeUniversalRouterSwapSummary(
+        quote.execution.swapCalldata,
+      )
+      expect(decoded.amountInMaximumRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(decoded.settleAmountRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+
+      const result = await provider.execute(quote)
+      expect(result.transactionData.swap.value).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(result.transactionData.tokenApproval).toBeUndefined()
+      expect(result.transactionData.permit2Approval).toBeUndefined()
     })
 
     it('throws without fee/tickSpacing in market filter', async () => {
