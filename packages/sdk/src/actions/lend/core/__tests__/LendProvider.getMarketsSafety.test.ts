@@ -2,43 +2,17 @@ import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import { MockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
-import { LendProvider } from '@/actions/lend/core/LendProvider.js'
-import type { Asset } from '@/types/asset.js'
-import type {
-  GetLendMarketsParams,
-  LendMarket,
-  LendMarketConfig,
-} from '@/types/lend/index.js'
 
-const MARKET_ASSET = '0x0000000000000000000000000000000000000001' as Address
+import {
+  assetAt,
+  callGetMarkets,
+  LEND_TEST_MARKET_ASSET as MARKET_ASSET,
+  marketConfig,
+} from './lendProviderTestUtils.js'
+
 const VAULT = '0x2222222222222222222222222222222222222222' as Address
 const OTHER_VAULT = '0x4444444444444444444444444444444444444444' as Address
 const WETH = '0x4200000000000000000000000000000000000006' as Address
-
-const assetAt = (address: Address): Asset => ({
-  address: { 84532: address },
-  metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
-  type: 'erc20',
-})
-
-const marketConfig = (
-  address: Address,
-  overrides: Partial<Pick<LendMarketConfig, 'asset' | 'chainId'>> = {},
-): LendMarketConfig => ({
-  address,
-  chainId: overrides.chainId ?? 84532,
-  name: 'Configured Market',
-  asset: overrides.asset ?? assetAt(MARKET_ASSET),
-  lendProvider: 'morpho',
-})
-
-const callGetMarkets = (
-  provider: MockLendProvider,
-  params: GetLendMarketsParams = {},
-): Promise<LendMarket[]> =>
-  LendProvider.prototype.getMarkets.call(provider, params) as Promise<
-    LendMarket[]
-  >
 
 describe('LendProvider getMarkets safety', () => {
   it('does not surface a caller-supplied market that is not allowlisted', async () => {

@@ -3,37 +3,22 @@ import { describe, expect, it } from 'vitest'
 
 import { MockUSDCAsset } from '@/__mocks__/MockAssets.js'
 import { MockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
-import { LendProvider } from '@/actions/lend/core/LendProvider.js'
 import type { Asset } from '@/types/asset.js'
 import type {
   LendMarketConfig,
   LendMarketId,
-  LendOpenPositionParams,
   LendTransaction,
 } from '@/types/lend/index.js'
 import { validateChainSupported } from '@/utils/validation.js'
 
-// MockLendProvider reports this market underlying on every chain.
-const MARKET_ASSET = '0x0000000000000000000000000000000000000001' as Address
+import {
+  callOpen as callBaseOpenPosition,
+  LEND_TEST_MARKET_ASSET as MARKET_ASSET,
+  marketConfig,
+} from './lendProviderTestUtils.js'
+
 const VAULT = '0x2222222222222222222222222222222222222222' as Address
 const WALLET = '0x3333333333333333333333333333333333333333' as Address
-
-const assetAt = (address: Address): Asset => ({
-  address: { 84532: address },
-  metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
-  type: 'erc20',
-})
-
-const marketConfig = (
-  address: Address,
-  overrides: Partial<Pick<LendMarketConfig, 'asset' | 'chainId'>> = {},
-): LendMarketConfig => ({
-  address,
-  chainId: overrides.chainId ?? 84532,
-  name: 'Configured Market',
-  asset: overrides.asset ?? assetAt(MARKET_ASSET),
-  lendProvider: 'morpho',
-})
 
 // Test helper class that exposes protected validation methods as public
 class TestLendProvider extends MockLendProvider {
@@ -216,18 +201,6 @@ describe('LendProvider', () => {
       walletAddress: WALLET,
     }
     const allowlist: LendMarketConfig[] = [marketConfig(VAULT)]
-
-    // MockLendProvider replaces `openPosition` with a vi.fn() in its
-    // constructor. To exercise the real base-class flow (which builds the
-    // approval tx around `_openPosition`'s output), call through the prototype.
-    const callBaseOpenPosition = (
-      provider: MockLendProvider,
-      params: LendOpenPositionParams,
-    ): Promise<LendTransaction> =>
-      LendProvider.prototype.openPosition.call(
-        provider,
-        params,
-      ) as Promise<LendTransaction>
 
     // Last 32 bytes of approve(spender, amount) hold `amount`.
     const approvalAmountHex = (result: LendTransaction): string =>

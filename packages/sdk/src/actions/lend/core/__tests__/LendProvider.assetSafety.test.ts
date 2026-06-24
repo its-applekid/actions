@@ -2,38 +2,27 @@ import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import { MockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
-import { LendProvider } from '@/actions/lend/core/LendProvider.js'
 import { MarketNotAllowedError } from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type {
-  ClosePositionParams,
   LendClosePositionParams,
-  LendMarketConfig,
   LendMarketId,
   LendOpenPosition,
   LendOpenPositionInternalParams,
-  LendOpenPositionParams,
   LendTransaction,
 } from '@/types/lend/index.js'
 
-const MARKET_ASSET = '0x0000000000000000000000000000000000000001' as Address
+import {
+  assetAt,
+  callClose,
+  callOpen,
+  LEND_TEST_MARKET_ASSET as MARKET_ASSET,
+  marketConfig,
+} from './lendProviderTestUtils.js'
+
 const VAULT = '0x2222222222222222222222222222222222222222' as Address
 const WETH = '0x4200000000000000000000000000000000000006' as Address
 const WALLET = '0x3333333333333333333333333333333333333333' as Address
-
-const assetAt = (address: Address): Asset => ({
-  address: { 84532: address },
-  metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
-  type: 'erc20',
-})
-
-const marketConfig = (address: Address): LendMarketConfig => ({
-  address,
-  chainId: 84532,
-  name: 'Configured Market',
-  asset: assetAt(MARKET_ASSET),
-  lendProvider: 'morpho',
-})
 
 class RecordingLendProvider extends MockLendProvider {
   public openCalls: LendOpenPositionInternalParams[] = []
@@ -53,24 +42,6 @@ class RecordingLendProvider extends MockLendProvider {
     return super._closePosition(params)
   }
 }
-
-const callOpen = (
-  provider: MockLendProvider,
-  params: LendOpenPositionParams,
-): Promise<LendTransaction> =>
-  LendProvider.prototype.openPosition.call(
-    provider,
-    params,
-  ) as Promise<LendTransaction>
-
-const callClose = (
-  provider: MockLendProvider,
-  params: ClosePositionParams,
-): Promise<LendTransaction> =>
-  LendProvider.prototype.closePosition.call(
-    provider,
-    params,
-  ) as Promise<LendTransaction>
 
 describe('LendProvider market asset safety', () => {
   const marketId: LendMarketId = { address: VAULT, chainId: 84532 }

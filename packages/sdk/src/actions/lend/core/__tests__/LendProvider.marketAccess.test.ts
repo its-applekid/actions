@@ -4,63 +4,30 @@ import { describe, expect, it } from 'vitest'
 import { MockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
 import { LendProvider } from '@/actions/lend/core/LendProvider.js'
 import { MarketNotAllowedError } from '@/core/error/errors.js'
-import type { Asset } from '@/types/asset.js'
 import type {
-  ClosePositionParams,
   GetLendMarketParams,
-  GetLendMarketsParams,
   LendMarket,
-  LendMarketConfig,
   LendMarketId,
   LendMarketPosition,
-  LendOpenPositionParams,
-  LendTransaction,
 } from '@/types/lend/index.js'
 
-const MARKET_ASSET = '0x0000000000000000000000000000000000000001' as Address
+import {
+  assetAt,
+  callClose,
+  callGetMarkets,
+  callOpen,
+  LEND_TEST_MARKET_ASSET as MARKET_ASSET,
+  marketConfig,
+} from './lendProviderTestUtils.js'
+
 const VAULT = '0x2222222222222222222222222222222222222222' as Address
 const WALLET = '0x3333333333333333333333333333333333333333' as Address
-
-const assetAt = (address: Address): Asset => ({
-  address: { 84532: address },
-  metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
-  type: 'erc20',
-})
-
-const marketConfig = (
-  address: Address,
-  overrides: Partial<Pick<LendMarketConfig, 'asset' | 'chainId'>> = {},
-): LendMarketConfig => ({
-  address,
-  chainId: overrides.chainId ?? 84532,
-  name: 'Configured Market',
-  asset: overrides.asset ?? assetAt(MARKET_ASSET),
-  lendProvider: 'morpho',
-})
 
 class TestLendProvider extends MockLendProvider {
   public validateMarketAllowed(marketId: LendMarketId): void {
     return super.validateMarketAllowed(marketId)
   }
 }
-
-const callOpen = (
-  provider: MockLendProvider,
-  params: LendOpenPositionParams,
-): Promise<LendTransaction> =>
-  LendProvider.prototype.openPosition.call(
-    provider,
-    params,
-  ) as Promise<LendTransaction>
-
-const callClose = (
-  provider: MockLendProvider,
-  params: ClosePositionParams,
-): Promise<LendTransaction> =>
-  LendProvider.prototype.closePosition.call(
-    provider,
-    params,
-  ) as Promise<LendTransaction>
 
 const callGetMarket = (
   provider: MockLendProvider,
@@ -77,14 +44,6 @@ const callGetPosition = (
     WALLET,
     marketId,
   ) as Promise<LendMarketPosition>
-
-const callGetMarkets = (
-  provider: MockLendProvider,
-  params: GetLendMarketsParams = {},
-): Promise<LendMarket[]> =>
-  LendProvider.prototype.getMarkets.call(provider, params) as Promise<
-    LendMarket[]
-  >
 
 describe('LendProvider market access safety', () => {
   describe('marketBlocklist enforcement', () => {
