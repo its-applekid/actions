@@ -177,8 +177,7 @@ describe('UniswapSwapProvider', () => {
         recipient,
       })
 
-      // Both the ERC-20→Permit2 and Permit2→router allowance reads must use the
-      // executing wallet as owner, never the (distinct) output recipient.
+      // Both allowance reads must use the executing wallet, not recipient.
       expect(owners.length).toBeGreaterThan(0)
       expect(owners).not.toContain(recipient.toLowerCase())
       for (const owner of owners) {
@@ -245,8 +244,7 @@ describe('UniswapSwapProvider', () => {
         recipient,
       })
 
-      // No wallet context (read-only): owner falls back to recipient and is
-      // never used for an allowance check.
+      // Read-only quotes fall back to recipient but never check allowances.
       expect(quote.walletAddress).toBe(recipient)
     })
   })

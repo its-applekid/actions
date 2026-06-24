@@ -271,8 +271,7 @@ describe('VelodromeSwapProvider', () => {
         chainManager,
       )
 
-      // Build a quote whose allowance owner (walletAddress) differs from its
-      // output recipient, then execute it via the pre-built-quote path.
+      // Execute a pre-built quote whose allowance owner differs from recipient.
       const quote = await provider.getQuote({
         assetIn: USDC,
         assetOut: OP,
