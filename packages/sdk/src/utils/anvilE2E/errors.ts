@@ -29,8 +29,9 @@ export class ForkE2EAnvilRpcError extends ActionsError {
    * Create an instance of ForkE2EAnvilRpcError.
    * @param params - RPC method and failure details.
    */
-  constructor(params: { method: string; details: string }) {
+  constructor(params: { method: string; details: string; cause?: Error }) {
     super(`Anvil RPC ${params.method} failed`, {
+      cause: params.cause,
       metaMessages: [params.details],
     })
   }

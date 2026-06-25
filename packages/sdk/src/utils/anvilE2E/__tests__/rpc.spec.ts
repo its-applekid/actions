@@ -43,6 +43,26 @@ describe('anvilE2E RPC helpers', () => {
       requestAnvilRpc(RPC_URL, 'anvil_impersonateAccount', [WALLET_ADDRESS]),
     ).rejects.toThrow(ForkE2EAnvilRpcError)
   })
+
+  it('wraps HTTP transport failures in a named error', async () => {
+    const cause = new TypeError('connection refused')
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(cause)
+
+    await expect(
+      requestAnvilRpc(RPC_URL, 'anvil_setBalance', [WALLET_ADDRESS, '0x1']),
+    ).rejects.toMatchObject({
+      cause,
+      name: 'ForkE2EAnvilRpcError',
+    })
+  })
+
+  it('wraps malformed JSON-RPC responses in a named error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not json'))
+
+    await expect(
+      requestAnvilRpc(RPC_URL, 'anvil_setBalance', [WALLET_ADDRESS, '0x1']),
+    ).rejects.toThrow(ForkE2EAnvilRpcError)
+  })
 })
 
 function rpcSuccess(result: unknown): Response {

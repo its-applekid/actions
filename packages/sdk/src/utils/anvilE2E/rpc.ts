@@ -43,7 +43,7 @@ export async function requestAnvilRpc(
     })
   }
 
-  const payload: unknown = await response.json()
+  const payload = await parseJsonRpcResponse(response, method)
   validateJsonRpcPayload(method, payload)
 }
 
@@ -52,16 +52,31 @@ async function postJsonRpc(
   method: string,
   params: readonly unknown[],
 ): Promise<Response> {
-  return fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: nextRpcId++,
-      jsonrpc: '2.0',
-      method,
-      params,
-    }),
-  })
+  try {
+    return await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: nextRpcId++,
+        jsonrpc: '2.0',
+        method,
+        params,
+      }),
+    })
+  } catch (cause) {
+    throw buildTransportError(method, cause)
+  }
+}
+
+async function parseJsonRpcResponse(
+  response: Response,
+  method: string,
+): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch (cause) {
+    throw buildParseError(method, cause)
+  }
 }
 
 function validateJsonRpcPayload(method: string, payload: unknown): void {
@@ -97,4 +112,31 @@ function isJsonRpcErrorPayload(value: unknown): value is JsonRpcErrorPayload {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function buildTransportError(
+  method: string,
+  cause: unknown,
+): ForkE2EAnvilRpcError {
+  return new ForkE2EAnvilRpcError({
+    method,
+    details: errorDetails(cause, 'HTTP request failed'),
+    cause: errorCause(cause),
+  })
+}
+
+function buildParseError(method: string, cause: unknown): ForkE2EAnvilRpcError {
+  return new ForkE2EAnvilRpcError({
+    method,
+    details: errorDetails(cause, 'Invalid JSON-RPC response body'),
+    cause: errorCause(cause),
+  })
+}
+
+function errorCause(cause: unknown): Error | undefined {
+  return cause instanceof Error ? cause : undefined
+}
+
+function errorDetails(cause: unknown, fallback: string): string {
+  return cause instanceof Error ? cause.message : fallback
 }
