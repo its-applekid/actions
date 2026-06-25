@@ -25,9 +25,6 @@ export interface TurnkeyWalletTestParams {
 
 /**
  * Build common Turnkey wallet creation options for tests.
- * @param client - Mock Turnkey client instance.
- * @param chainManager - Chain manager used by the wallet under test.
- * @param params - Turnkey signing key and optional reported address.
  * @returns Shared Turnkey wallet creation options.
  */
 export function createTurnkeyWalletOptions<Client>(
@@ -47,12 +44,8 @@ export function createTurnkeyWalletOptions<Client>(
 }
 
 /**
- * Registry that models Turnkey's `createAccount` contract for tests: the
- * signing key is resolved from `signWith`, while the reported `.address` is the
- * caller-supplied `ethereumAddress` when present, or the key's own address when
- * omitted (Turnkey fetches it from the API). A matched
- * `signWith`/`ethereumAddress` pair reconciles; a pair pointing at a different
- * key's address is detectably divergent.
+ * Registry models Turnkey tests: `signWith` resolves the signing key, while
+ * reported `.address` comes from `ethereumAddress` when present.
  */
 export function createTurnkeyKeyRegistry(): MockSigningKeyRegistry {
   const registry = createMockSigningKeyRegistry()

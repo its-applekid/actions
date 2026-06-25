@@ -32,7 +32,6 @@ export type MockDynamicWallet =
 
 /**
  * Normalize a raw hash message passed through Dynamic's connector.
- * @param message - Raw hash with or without the `0x` prefix.
  * @returns Hex hash suitable for viem local-account signing.
  * @throws Error when the message is not valid hex.
  */
@@ -44,8 +43,6 @@ export function normalizeRawHash(message: string): Hex {
 
 /**
  * Sign a raw hash with a mock local account.
- * @param account - Local account used as the signing backend.
- * @param hash - Raw hash to sign.
  * @returns Signature bytes.
  * @throws Error when the account cannot sign raw hashes.
  */

@@ -48,8 +48,6 @@ export function createMockPrivyWallet(params?: {
 
 /**
  * Create a Privy wallet whose reported address matches its signing key.
- * @param registry - Mock key registry used by the Privy account factory.
- * @param id - Mock Privy wallet ID.
  * @returns Mock Privy wallet metadata.
  */
 export function createMatchedPrivyWallet(
@@ -74,11 +72,8 @@ export function getMockAuthorizationContext(
 }
 
 /**
- * Registry that models Privy's `createViemAccount` contract for tests: the
- * signing key is resolved from `walletId`, while the reported `.address` is
- * taken from the caller. A matched `(walletId, address)` pair reconciles; a
- * pair pointing at a different wallet's address is detectably divergent, which
- * is exactly the misconfiguration the reconciliation seam guards against.
+ * Registry models Privy tests: `walletId` resolves the signing key, while
+ * reported `.address` comes from the caller.
  */
 export function createPrivyKeyRegistry(): MockSigningKeyRegistry {
   const registry = createMockSigningKeyRegistry()

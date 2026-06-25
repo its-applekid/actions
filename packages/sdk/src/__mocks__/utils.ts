@@ -12,19 +12,14 @@ export const getRandomAddress = () => {
 }
 
 /**
- * @description Creates a signing-capable account whose signatures recover to
- * its reported address. Use this when a test needs a signer that actually
- * controls the address it reports.
+ * Create a signing account whose signatures recover to its reported address.
  * @returns A randomly generated account with matching reported and recovered addresses.
  */
 export const createSigningAccount = (): LocalAccount =>
   privateKeyToAccount(generatePrivateKey())
 
 /**
- * @description Creates an account whose reported address is deliberately
- * different from the address recovered from its signatures. Models a hosted
- * wallet whose reported address and signing backend disagree.
- * @param reportedAddress - Address exposed by the returned account.
+ * Create an account whose reported address differs from its signing key.
  * @returns A signing account that fails signer-address reconciliation.
  */
 export const createDivergingAccount = (

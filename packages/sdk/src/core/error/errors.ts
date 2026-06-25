@@ -242,13 +242,7 @@ export class ZeroAddressError extends ActionsError {
 
 /**
  * Thrown when a wallet's reported address is not controlled by its signing key.
- * @description Every hosted wallet (Privy, Turnkey, Dynamic) exposes a reported
- * `.address` and a separate signing backend. When the two diverge, for example
- * mismatched Privy `(walletId, address)` pair, a Turnkey
- * `ethereumAddress`/`signWith` mismatch, or a re-wrapped vendor account, the SDK
- * would build, approve, and sign against an account the key cannot control.
- * The SDK surfaces this at construction time instead of letting it become a
- * wrong-account signature.
+ * Surfaces hosted wallet key/address divergence at construction time.
  */
 export class SignerAddressMismatchError extends ActionsError {
   override name = 'SignerAddressMismatchError' as const

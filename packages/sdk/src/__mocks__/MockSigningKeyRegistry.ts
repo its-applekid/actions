@@ -14,8 +14,7 @@ export interface MockSigningKeyRegistry {
 
 /**
  * Create a deterministic mock signing-key registry.
- * @description The key ID controls the signing key, while `reportedAddress`
- * can intentionally diverge to exercise signer reconciliation failures.
+ * Key IDs control signing keys; reported addresses may intentionally diverge.
  * @returns Registry helpers for mock addresses and local accounts.
  */
 export function createMockSigningKeyRegistry(): MockSigningKeyRegistry {
