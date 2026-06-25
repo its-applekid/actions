@@ -85,6 +85,30 @@ describe('anvil setup helpers', () => {
     await expect(start).rejects.toThrow(ForkE2EAnvilStartError)
     expect(proc.kill).toHaveBeenCalledOnce()
   })
+
+  it('wraps Anvil exits before readiness with exit details', async () => {
+    const proc = createChildProcessMock()
+    spawnMock.mockReturnValue(proc)
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      () => new Promise<Response>(() => {}),
+    )
+
+    const start = startOrAttachAnvilFork({
+      chain: unichain,
+      chainId: CHAIN_ID,
+      forkUrl: RPC_URL,
+      mode: 'start',
+      port: 18547,
+    })
+    proc.emit('exit', 1, null)
+
+    const error = await start.catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ForkE2EAnvilStartError)
+    if (!(error instanceof ForkE2EAnvilStartError)) return
+    expect(error.message).toContain('exit code: 1')
+    expect(error.message).toContain('signal: none')
+    expect(proc.kill).toHaveBeenCalledOnce()
+  })
 })
 
 function createChildProcessMock() {

@@ -7,6 +7,7 @@ import {
   createPublicClientMock,
   createReceipt,
   createSwapReceipt,
+  RECIPIENT_ADDRESS,
   TEST_TOKEN,
   TOKEN_ADDRESS,
   TX_HASH,
@@ -73,6 +74,32 @@ describe('anvil action runners', () => {
     expect(sendBatch).toHaveBeenCalledWith(transactions, CHAIN_ID)
     expect(result.result).toBe(receipts)
     expect(getSnapshotBalance(result.after, ETH)).toBe(8n)
+  })
+
+  it('snapshots configured addresses around a wallet batch-send scenario', async () => {
+    const publicClient = createPublicClientMock({
+      ethBalances: [10n, 1n, 8n, 3n],
+      tokenBalances: [],
+    })
+    const receipts = [createReceipt('success', TX_HASH)]
+    const sendBatch = vi.fn().mockResolvedValue(receipts)
+    const wallet = { address: WALLET_ADDRESS, sendBatch }
+    const transactions = [
+      { data: '0x', to: RECIPIENT_ADDRESS, value: 2n },
+    ] as const
+
+    const result = await runForkWalletBatchSendE2E(wallet, {
+      balanceAssets: [ETH],
+      chainId: CHAIN_ID,
+      publicClient,
+      snapshotAddresses: [WALLET_ADDRESS, RECIPIENT_ADDRESS],
+      transactions,
+    })
+
+    expect(result.before.address).toBe(WALLET_ADDRESS)
+    expect(result.afterSnapshots[1].address).toBe(RECIPIENT_ADDRESS)
+    expect(getSnapshotBalance(result.beforeSnapshots[1], ETH)).toBe(1n)
+    expect(getSnapshotBalance(result.afterSnapshots[1], ETH)).toBe(3n)
   })
 
   it('runs a swap scenario through the public wallet namespace', async () => {

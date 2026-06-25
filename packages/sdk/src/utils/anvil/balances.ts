@@ -1,3 +1,4 @@
+import type { Address } from 'viem'
 import { erc20Abi, isAddressEqual } from 'viem'
 
 import type { Asset } from '@/types/asset.js'
@@ -20,7 +21,7 @@ import type {
  */
 export async function snapshotTokenBalances(
   context: ForkScenarioContext,
-  walletAddress: `0x${string}`,
+  walletAddress: Address,
   assets: readonly Asset[],
 ): Promise<ForkBalanceSnapshot> {
   const balances = await Promise.all(
@@ -68,7 +69,7 @@ function isSameChainAsset(
 
 async function snapshotAssetBalance(
   context: ForkScenarioContext,
-  walletAddress: `0x${string}`,
+  walletAddress: Address,
   asset: Asset,
 ): Promise<ForkBalanceEntry> {
   if (asset.type === 'native') {
@@ -84,7 +85,7 @@ async function snapshotAssetBalance(
 
 async function snapshotErc20Balance(
   context: ForkScenarioContext,
-  walletAddress: `0x${string}`,
+  walletAddress: Address,
   asset: Asset,
 ): Promise<ForkBalanceEntry> {
   const address = asset.address[context.chainId]

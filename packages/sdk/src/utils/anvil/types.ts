@@ -1,4 +1,4 @@
-import type { Chain, LocalAccount, PublicClient } from 'viem'
+import type { Address, Chain, LocalAccount, PublicClient } from 'viem'
 
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import type { NodeActionsConfig } from '@/nodeActionsFactory.js'
@@ -91,19 +91,28 @@ export interface ForkBalanceEntry {
 }
 
 export interface ForkBalanceSnapshot {
-  address: `0x${string}`
+  address: Address
   balances: readonly ForkBalanceEntry[]
   chainId: SupportedChainId
 }
 
+export type ForkSnapshotAddresses = readonly [Address, ...Address[]]
+export type ForkBalanceSnapshots = readonly [
+  ForkBalanceSnapshot,
+  ...ForkBalanceSnapshot[],
+]
+
 export interface ForkScenarioContext {
   chainId: SupportedChainId
   publicClient: PublicClient
+  snapshotAddresses?: ForkSnapshotAddresses
 }
 
 export interface ForkScenarioRunResult<TResult> {
   after: ForkBalanceSnapshot
+  afterSnapshots: ForkBalanceSnapshots
   before: ForkBalanceSnapshot
+  beforeSnapshots: ForkBalanceSnapshots
   result: TResult
 }
 
