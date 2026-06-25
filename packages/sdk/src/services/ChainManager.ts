@@ -34,11 +34,8 @@ function pollingIntervalForChain(chainId: SupportedChainId): number {
 }
 
 /**
- * viem chain definitions for SDK-supported chains that the Superchain-only
- * `@eth-optimism/viem/chains` registry (`chainById`) does not include: the
- * Ethereum L1 chains. Used as a fallback so settlement-layer reads (notably
- * ENS resolution, which runs on Ethereum mainnet) can be configured with an
- * operator-trusted RPC instead of relying on a public fallback.
+ * viem definitions for supported Ethereum L1 chains missing from `chainById`.
+ * Used so ENS can run through operator-configured RPCs.
  */
 const L1_VIEM_CHAINS: Partial<Record<SupportedChainId, Chain>> = {
   [mainnet.id]: mainnet,
@@ -46,15 +43,9 @@ const L1_VIEM_CHAINS: Partial<Record<SupportedChainId, Chain>> = {
 }
 
 /**
- * @description Resolves the viem {@link Chain} for a supported chain id,
- * preferring the Superchain registry (`chainById`) and falling back to the
- * Ethereum L1 definitions in {@link L1_VIEM_CHAINS}.
- * @param chainId - A {@link SupportedChainId} to resolve.
- * @returns The viem {@link Chain}, or `undefined` when the id is unknown to
- * both registries.
- * @internal Not part of the public SDK surface; exported only so
- * `MockChainManager` can mirror `ChainManager`'s resolution logic. No stability
- * guarantee.
+ * Resolve the viem `Chain` for a supported chain id.
+ * Prefers Superchain `chainById`, then Ethereum L1 fallbacks.
+ * @internal Exported for test parity only; not public SDK surface.
  */
 export function viemChainFor(chainId: SupportedChainId): Chain | undefined {
   return chainById[chainId] ?? L1_VIEM_CHAINS[chainId]

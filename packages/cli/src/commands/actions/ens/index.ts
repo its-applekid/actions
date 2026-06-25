@@ -5,10 +5,8 @@ import { runEnsResolve } from '@/commands/actions/ens/resolve.js'
 import { runEnsReverse } from '@/commands/actions/ens/reverse.js'
 
 /**
- * @description Builds the root `ens` subcommand tree. All children are
- * read-only ENS reads on Ethereum mainnet and need no signer. Mainnet must be
- * configured via `MAINNET_RPC_URL`; otherwise each command exits `config` (3).
- * @returns Commander `Command` configured with `resolve`, `reverse`, `info`.
+ * Build the root read-only ENS subcommand tree.
+ * @returns Commander command with `resolve`, `reverse`, and `info`.
  */
 export function ensCommand(): Command {
   const command = new Command('ens').description(

@@ -75,10 +75,8 @@ export const AmountWithMaxSchema = z
   )
 
 /**
- * BorrowMarketId tagged union (Morpho variant only for PR #4). Mirrors
- * the SDK's `BorrowMarketId` shape designed in PR #3. Future Aave /
- * Compound / Liquity / Euler variants are added when those providers
- * ship.
+ * BorrowMarketId tagged union, currently supporting the Morpho variant.
+ * Future protocol variants can be added when those providers ship.
  */
 export const BorrowMarketIdSchema = z.discriminatedUnion('kind', [
   z.strictObject({
