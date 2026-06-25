@@ -38,6 +38,30 @@ export class ForkE2EAnvilRpcError extends ActionsError {
 }
 
 /**
+ * Fork e2e Anvil process startup error.
+ * @description Thrown when a local Anvil fork process cannot start or never
+ * becomes ready for JSON-RPC requests.
+ */
+export class ForkE2EAnvilStartError extends ActionsError {
+  override name = 'ForkE2EAnvilStartError' as const
+
+  /**
+   * Create an instance of ForkE2EAnvilStartError.
+   * @param params - Fork port and startup failure details.
+   */
+  constructor(params: { port: number; cause?: Error; details?: string }) {
+    super(`Anvil fork on port ${params.port} failed to start`, {
+      cause: params.cause,
+      metaMessages: [
+        params.details ??
+          params.cause?.message ??
+          'Process failed before accepting JSON-RPC requests.',
+      ],
+    })
+  }
+}
+
+/**
  * Fork e2e receipt error.
  * @description Thrown when a mined transaction or user operation receipt is
  * present but did not succeed.

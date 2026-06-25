@@ -16,10 +16,15 @@ import type {
   ForkScenarioRunResult,
   ForkSwapScenario,
   ForkSwapTarget,
+  ForkWalletBatchSendScenario,
+  ForkWalletBatchSendTarget,
   ForkWalletSendScenario,
   ForkWalletSendTarget,
 } from '@/utils/anvil/types.js'
-import type { TransactionReturnType } from '@/wallet/core/wallets/abstract/types/index.js'
+import type {
+  BatchTransactionReturnType,
+  TransactionReturnType,
+} from '@/wallet/core/wallets/abstract/types/index.js'
 
 /**
  * Run a standard wallet send e2e scenario.
@@ -41,6 +46,30 @@ export async function runForkWalletSendE2E(
     async () =>
       assertSuccessfulReceipts(
         await wallet.send(scenario.transaction, scenario.chainId),
+      ),
+  )
+}
+
+/**
+ * Run a standard wallet batch-send e2e scenario.
+ * @description Sends a transaction list through the public wallet batch API,
+ * asserts all mined receipts succeeded, and snapshots selected balances.
+ * @param wallet - SDK wallet created from `setupForkActions`.
+ * @param scenario - Wallet batch-send scenario.
+ * @returns Before snapshot, wallet batch receipt, and after snapshot.
+ * @throws ForkE2EReceiptError when any wallet receipt is not successful.
+ */
+export async function runForkWalletBatchSendE2E(
+  wallet: ForkWalletBatchSendTarget,
+  scenario: ForkWalletBatchSendScenario,
+): Promise<ForkScenarioRunResult<BatchTransactionReturnType>> {
+  return runWithSnapshots(
+    wallet,
+    scenario,
+    scenario.balanceAssets ?? [],
+    async () =>
+      assertSuccessfulReceipts(
+        await wallet.sendBatch(scenario.transactions, scenario.chainId),
       ),
   )
 }
