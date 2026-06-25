@@ -70,58 +70,6 @@ const expectedBatchSendDeltas = [
 
 let fork: ForkHarness
 
-describe('EOAWallet standard fork e2e', () => {
-  beforeAll(async () => {
-    fork = await startOrAttachAnvilFork(buildForkConfig())
-  }, 60_000)
-
-  afterAll(() => {
-    fork?.stop()
-  })
-
-  it('sends ETH through the public EOA wallet API', async () => {
-    const { account, wallet } = await setupFundedEoaWallet()
-
-    const result = await runForkWalletSendE2E(wallet, {
-      balanceAssets: [ETH],
-      chainId: CHAIN_ID,
-      publicClient: fork.publicClient,
-      snapshotAddresses: [wallet.address, expectedSingleSendDelta.address],
-      transaction: singleSendTransaction,
-    })
-
-    expect(wallet.address).toBe(account.address)
-    expect(result.result).toBeDefined()
-    expectNativeBalanceDelta(
-      result.beforeSnapshots[1],
-      result.afterSnapshots[1],
-      expectedSingleSendDelta.amountRaw,
-    )
-  })
-
-  it('sends an ETH batch through the public EOA wallet API', async () => {
-    const { wallet } = await setupFundedEoaWallet()
-
-    const result = await runForkWalletBatchSendE2E(wallet, {
-      balanceAssets: [ETH],
-      chainId: CHAIN_ID,
-      publicClient: fork.publicClient,
-      snapshotAddresses: [wallet.address, BATCH_RECIPIENT_A, BATCH_RECIPIENT_B],
-      transactions: batchSendTransactions,
-    })
-
-    expect(result.result).toHaveLength(batchSendTransactions.length)
-    for (const [index, delta] of expectedBatchSendDeltas.entries()) {
-      const snapshotIndex = index + 1
-      expectNativeBalanceDelta(
-        result.beforeSnapshots[snapshotIndex],
-        result.afterSnapshots[snapshotIndex],
-        delta.amountRaw,
-      )
-    }
-  })
-})
-
 function buildForkConfig(): ForkHarnessConfig {
   const rpcUrl = process.env.BASE_SEPOLIA_FORK_RPC
   if (rpcUrl) {
@@ -175,3 +123,55 @@ function expectNativeBalanceDelta(
     expectedDeltaRaw,
   )
 }
+
+describe('EOAWallet standard fork e2e', () => {
+  beforeAll(async () => {
+    fork = await startOrAttachAnvilFork(buildForkConfig())
+  }, 60_000)
+
+  afterAll(() => {
+    fork?.stop()
+  })
+
+  it('sends ETH through the public EOA wallet API', async () => {
+    const { account, wallet } = await setupFundedEoaWallet()
+
+    const result = await runForkWalletSendE2E(wallet, {
+      balanceAssets: [ETH],
+      chainId: CHAIN_ID,
+      publicClient: fork.publicClient,
+      snapshotAddresses: [wallet.address, expectedSingleSendDelta.address],
+      transaction: singleSendTransaction,
+    })
+
+    expect(wallet.address).toBe(account.address)
+    expect(result.result).toBeDefined()
+    expectNativeBalanceDelta(
+      result.beforeSnapshots[1],
+      result.afterSnapshots[1],
+      expectedSingleSendDelta.amountRaw,
+    )
+  })
+
+  it('sends an ETH batch through the public EOA wallet API', async () => {
+    const { wallet } = await setupFundedEoaWallet()
+
+    const result = await runForkWalletBatchSendE2E(wallet, {
+      balanceAssets: [ETH],
+      chainId: CHAIN_ID,
+      publicClient: fork.publicClient,
+      snapshotAddresses: [wallet.address, BATCH_RECIPIENT_A, BATCH_RECIPIENT_B],
+      transactions: batchSendTransactions,
+    })
+
+    expect(result.result).toHaveLength(batchSendTransactions.length)
+    for (const [index, delta] of expectedBatchSendDeltas.entries()) {
+      const snapshotIndex = index + 1
+      expectNativeBalanceDelta(
+        result.beforeSnapshots[snapshotIndex],
+        result.afterSnapshots[snapshotIndex],
+        delta.amountRaw,
+      )
+    }
+  })
+})
