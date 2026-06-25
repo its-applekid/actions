@@ -167,8 +167,7 @@ export const EXACT_OUTPUT_SINGLE_PARAMS = [
 /**
  * ABI type for ExactInputParams (multi-hop, exact in).
  * Matches the deployed V4Router shape used by this repo's single-hop encoding
- * (no `minHopPriceX36` — that field exists only in newer v4-periphery).
- * @see https://docs.uniswap.org/contracts/v4/reference/periphery/interfaces/IV4Router
+ * without newer v4-periphery-only fields.
  */
 export const EXACT_INPUT_PARAMS = [
   {

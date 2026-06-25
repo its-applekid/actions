@@ -138,15 +138,9 @@ export function buildPath(
 }
 
 /**
- * Resolve a configured forward route into V4 PathKeys oriented for the actual
- * swap direction and amount kind.
- *
- * V4 consumes the path differently per amount kind: exact-input iterates the
- * path forward (each `intermediateCurrency` is a hop's **output**), while
- * exact-output iterates it backward (each `intermediateCurrency` is a hop's
- * **input**). The fee/tickSpacing stay positionally aligned with the pools in
- * both cases.
- * @see https://github.com/Uniswap/v4-periphery/blob/main/src/libraries/PathKey.sol
+ * Resolve a configured forward route into V4 PathKeys by direction and amount kind.
+ * Exact-input consumes hop outputs forward; exact-output consumes inputs backward.
+ * Fees and tick spacing remain positionally aligned with the pools.
  */
 function resolvePathParams(
   assetIn: Asset,

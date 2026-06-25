@@ -1,8 +1,6 @@
 /**
- * Top-level Borrow tab layout. Wires the lend-position selector (the collateral
- * source) to the borrow provider's selected market and mounts the borrow form
- * once collateral is selected. Zero-deposit positions are filtered out; with
- * none eligible, the no-collateral banner shows.
+ * Top-level Borrow tab layout.
+ * Wires eligible lend positions into the selected borrow market and form.
  */
 
 import { useEffect, useMemo, useState } from 'react'
