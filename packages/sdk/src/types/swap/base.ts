@@ -205,11 +205,14 @@ export interface SwapQuote {
   chainId: SupportedChainId
 
   // ── Amounts (Raw = on-chain precision, number = display approximation) ──
-  /** Human-readable input amount (display only — use amountInRaw for precision) */
+  /** Human-readable input amount. Display only, use amountInRaw for precision. */
   amountIn: number
-  /** Input amount as raw bigint (native decimals). Source of truth. */
+  /**
+   * Input amount as raw bigint. Source of truth. Exact-output quotes store the
+   * slippage-expanded maximum input here, matching approvals and native value.
+   */
   amountInRaw: bigint
-  /** Human-readable expected output (display only — use amountOutRaw for precision) */
+  /** Human-readable expected output. Display only, use amountOutRaw for precision. */
   amountOut: number
   /** Expected output as raw bigint. Source of truth. */
   amountOutRaw: bigint

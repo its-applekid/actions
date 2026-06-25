@@ -12,11 +12,15 @@ import {
   ExactOutputNotSupportedError,
   InvalidAmountError,
   InvalidParamsError,
+  InvalidRecipientError,
   MarketIdRequiredError,
   MarketNotAllowedError,
   MarketNotFoundError,
   NativeAssetAddressError,
+  NativeAssetNotSupportedError,
   ProviderNotConfiguredError,
+  QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
@@ -140,6 +144,33 @@ describe('ActionsError hierarchy', () => {
     expect(err.shortMessage).toContain('Quote.recipient')
   })
 
+  it('QuoteCalldataRecipientMismatchError', () => {
+    const err = new QuoteCalldataRecipientMismatchError({
+      calldataRecipient: '0xaaa',
+      walletAddress: '0xbbb',
+    })
+    expect(err.name).toBe('QuoteCalldataRecipientMismatchError')
+    expect(err.calldataRecipient).toBe('0xaaa')
+    expect(err.walletAddress).toBe('0xbbb')
+    expect(err).toBeInstanceOf(ActionsError)
+    expect(err.shortMessage).toContain('0xaaa')
+    expect(err.shortMessage).toContain('0xbbb')
+  })
+
+  it('QuoteExecutionMismatchError', () => {
+    const err = new QuoteExecutionMismatchError({
+      field: 'execution.routerAddress',
+      expected: '0xaaa',
+      received: '0xbbb',
+    })
+    expect(err.name).toBe('QuoteExecutionMismatchError')
+    expect(err.field).toBe('execution.routerAddress')
+    expect(err.expected).toBe('0xaaa')
+    expect(err.received).toBe('0xbbb')
+    expect(err).toBeInstanceOf(ActionsError)
+    expect(err.shortMessage).toContain('execution.routerAddress')
+  })
+
   it('ExactOutputNotSupportedError', () => {
     const err = new ExactOutputNotSupportedError('Velodrome')
     expect(err.name).toBe('ExactOutputNotSupportedError')
@@ -192,6 +223,37 @@ describe('ActionsError hierarchy', () => {
     expect(err.shortMessage).toContain('ETH')
   })
 
+  it('InvalidRecipientError', () => {
+    const err = new InvalidRecipientError('0x1234')
+    expect(err.name).toBe('InvalidRecipientError')
+    expect(err.recipient).toBe('0x1234')
+    expect(err).toBeInstanceOf(ActionsError)
+    expect(err.shortMessage).toContain('checksummed')
+  })
+
+  it('NativeAssetNotSupportedError', () => {
+    const err = new NativeAssetNotSupportedError({
+      symbol: 'ETH',
+      context: 'Velodrome universal router',
+    })
+    expect(err.name).toBe('NativeAssetNotSupportedError')
+    expect(err.symbol).toBe('ETH')
+    expect(err.context).toBe('Velodrome universal router')
+    expect(err.operation).toBe('input')
+    expect(err).toBeInstanceOf(ActionsError)
+    expect(err.shortMessage).toContain('ETH')
+  })
+
+  it('NativeAssetNotSupportedError with output operation', () => {
+    const err = new NativeAssetNotSupportedError({
+      symbol: 'ETH',
+      context: 'Velodrome CL router',
+      operation: 'output',
+    })
+    expect(err.operation).toBe('output')
+    expect(err.shortMessage).toContain('output')
+  })
+
   it('MarketNotFoundError with poolId', () => {
     const err = new MarketNotFoundError({ chainId: 10, poolId: '0xabc' })
     expect(err.name).toBe('MarketNotFoundError')
@@ -236,11 +298,25 @@ describe('ActionsError hierarchy', () => {
         walletAddress: '0xbbb',
       }),
       new QuoteRecipientMissingError(),
+      new QuoteCalldataRecipientMismatchError({
+        calldataRecipient: '0xaaa',
+        walletAddress: '0xbbb',
+      }),
+      new QuoteExecutionMismatchError({
+        field: 'field',
+        expected: 'expected',
+        received: 'received',
+      }),
       new ExactOutputNotSupportedError('X'),
       new ZeroAddressError('label'),
       new SlippageOutOfRangeError(1, 0.5),
       new AssetNotSupportedOnChainError('X', 1),
       new NativeAssetAddressError('ETH'),
+      new InvalidRecipientError('0x1234'),
+      new NativeAssetNotSupportedError({
+        symbol: 'ETH',
+        context: 'test',
+      }),
       new AssetMetadataRequiredError(),
       new InvalidParamsError({ param: 'x', expected: 'y' }),
     ]

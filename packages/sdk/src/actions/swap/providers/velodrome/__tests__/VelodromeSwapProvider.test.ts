@@ -1,21 +1,33 @@
 import type { Address, PublicClient } from 'viem'
 import { decodeFunctionData, erc20Abi, maxUint256 } from 'viem'
-import { mode, optimism } from 'viem/chains'
+import { baseSepolia, mode, optimism } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   MOCK_WALLET,
+  MockETHAsset as ETH,
   MockOPAsset as OP,
   MockUSDCAsset as USDC,
   MockWETHAsset as WETH,
 } from '@/__mocks__/MockAssets.js'
+import {
+  decodeCLSwapRecipient,
+  decodeSwapRecipient,
+} from '@/actions/swap/providers/velodrome/encoding/index.js'
 import type { VelodromeSwapProviderConfig } from '@/actions/swap/providers/velodrome/types.js'
 import { VelodromeSwapProvider } from '@/actions/swap/providers/velodrome/VelodromeSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import {
+  InvalidParamsError,
+  NativeAssetNotSupportedError,
+  QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
+} from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { Asset } from '@/types/asset.js'
 
 const CHAIN_ID = optimism.id as SupportedChainId
+const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id as SupportedChainId
 
 function createMockChainManager(
   supportedChains: SupportedChainId[] = [CHAIN_ID],
@@ -44,13 +56,14 @@ function createMockChainManager(
 
 function createProvider(
   configOverrides?: Partial<VelodromeSwapProviderConfig>,
+  chainManager: ChainManager = createMockChainManager(),
 ): VelodromeSwapProvider {
   const config: VelodromeSwapProviderConfig = {
     defaultSlippage: 0.005,
     marketAllowlist: [{ assets: [USDC, OP], stable: false, chainId: CHAIN_ID }],
     ...configOverrides,
   }
-  return new VelodromeSwapProvider(config, createMockChainManager())
+  return new VelodromeSwapProvider(config, chainManager)
 }
 
 describe('VelodromeSwapProvider', () => {
@@ -134,6 +147,254 @@ describe('VelodromeSwapProvider', () => {
       })
       expect(decoded.functionName).toBe('approve')
       expect(decoded.args[1]).toBe(maxUint256)
+    })
+
+    it('routes output to requested recipient while checking wallet allowance', async () => {
+      const chainManager = createMockChainManager()
+      const provider = createProvider(undefined, chainManager)
+      const recipient = '0x5555555555555555555555555555555555555555' as Address
+
+      const result = await provider.execute({
+        amountIn: 100,
+        assetIn: USDC,
+        assetOut: OP,
+        chainId: CHAIN_ID,
+        walletAddress: MOCK_WALLET,
+        recipient,
+      })
+
+      expect(decodeSwapRecipient(result.transactionData.swap.data, 'v2')).toBe(
+        recipient,
+      )
+
+      const publicClient = chainManager.getPublicClient(
+        CHAIN_ID,
+      ) as unknown as PublicClient
+      expect(publicClient.readContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'allowance',
+          args: [MOCK_WALLET, expect.any(String)],
+        }),
+      )
+    })
+
+    it('routes universal output to requested recipient while checking wallet allowance', async () => {
+      const chainManager = createMockChainManager([BASE_SEPOLIA_CHAIN_ID])
+      const provider = createProvider(
+        {
+          marketAllowlist: [
+            {
+              assets: [USDC, WETH],
+              stable: false,
+              chainId: BASE_SEPOLIA_CHAIN_ID,
+            },
+          ],
+        },
+        chainManager,
+      )
+      const recipient = '0x5555555555555555555555555555555555555555' as Address
+
+      const result = await provider.execute({
+        amountIn: 100,
+        assetIn: USDC,
+        assetOut: WETH,
+        chainId: BASE_SEPOLIA_CHAIN_ID,
+        walletAddress: MOCK_WALLET,
+        recipient,
+      })
+
+      expect(
+        decodeSwapRecipient(result.transactionData.swap.data, 'universal'),
+      ).toBe(recipient)
+
+      const publicClient = chainManager.getPublicClient(
+        BASE_SEPOLIA_CHAIN_ID,
+      ) as unknown as PublicClient
+      expect(publicClient.readContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'allowance',
+          args: [MOCK_WALLET, expect.any(String)],
+        }),
+      )
+    })
+
+    it('routes CL output to requested recipient while checking wallet allowance', async () => {
+      const chainManager = createMockChainManager()
+      const provider = createProvider(
+        {
+          marketAllowlist: [
+            { assets: [USDC, WETH], tickSpacing: 100, chainId: CHAIN_ID },
+          ],
+        },
+        chainManager,
+      )
+      const recipient = '0x5555555555555555555555555555555555555555' as Address
+
+      const result = await provider.execute({
+        amountIn: 100,
+        assetIn: USDC,
+        assetOut: WETH,
+        chainId: CHAIN_ID,
+        walletAddress: MOCK_WALLET,
+        recipient,
+      })
+
+      expect(decodeCLSwapRecipient(result.transactionData.swap.data)).toBe(
+        recipient,
+      )
+
+      const publicClient = chainManager.getPublicClient(
+        CHAIN_ID,
+      ) as unknown as PublicClient
+      expect(publicClient.readContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'allowance',
+          args: [MOCK_WALLET, expect.any(String)],
+        }),
+      )
+    })
+
+    it('rejects native input and output on universal routes', async () => {
+      const provider = createProvider(
+        {
+          marketAllowlist: [
+            {
+              assets: [ETH, USDC],
+              stable: false,
+              chainId: BASE_SEPOLIA_CHAIN_ID,
+            },
+            {
+              assets: [USDC, ETH],
+              stable: false,
+              chainId: BASE_SEPOLIA_CHAIN_ID,
+            },
+          ],
+        },
+        createMockChainManager([BASE_SEPOLIA_CHAIN_ID]),
+      )
+
+      await expect(
+        provider.getQuote({
+          assetIn: ETH,
+          assetOut: USDC,
+          amountIn: 1,
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+        }),
+      ).rejects.toBeInstanceOf(NativeAssetNotSupportedError)
+
+      await expect(
+        provider.getQuote({
+          assetIn: USDC,
+          assetOut: ETH,
+          amountIn: 100,
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+        }),
+      ).rejects.toBeInstanceOf(NativeAssetNotSupportedError)
+    })
+
+    it('rejects native input and output on CL routes', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          { assets: [ETH, USDC], tickSpacing: 100, chainId: CHAIN_ID },
+          { assets: [USDC, ETH], tickSpacing: 100, chainId: CHAIN_ID },
+        ],
+      })
+
+      await expect(
+        provider.getQuote({
+          assetIn: ETH,
+          assetOut: USDC,
+          amountIn: 1,
+          chainId: CHAIN_ID,
+        }),
+      ).rejects.toBeInstanceOf(NativeAssetNotSupportedError)
+
+      await expect(
+        provider.getQuote({
+          assetIn: USDC,
+          assetOut: ETH,
+          amountIn: 100,
+          chainId: CHAIN_ID,
+        }),
+      ).rejects.toBeInstanceOf(NativeAssetNotSupportedError)
+    })
+
+    it('rejects pre-built quotes whose calldata routes to a different recipient', async () => {
+      const provider = createProvider()
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: MOCK_WALLET,
+      })
+      const attackerQuote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: '0x5555555555555555555555555555555555555555' as Address,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: {
+            ...quote.execution,
+            swapCalldata: attackerQuote.execution.swapCalldata,
+          },
+        }),
+      ).rejects.toBeInstanceOf(QuoteCalldataRecipientMismatchError)
+    })
+
+    it('rejects pre-built quotes whose calldata routes a different output token', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          { assets: [USDC, OP, WETH], stable: false, chainId: CHAIN_ID },
+        ],
+      })
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: MOCK_WALLET,
+      })
+      const wethQuote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: WETH,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: MOCK_WALLET,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: {
+            ...quote.execution,
+            swapCalldata: wethQuote.execution.swapCalldata,
+          },
+        }),
+      ).rejects.toBeInstanceOf(QuoteExecutionMismatchError)
+    })
+
+    it('rejects malformed pre-built quote calldata with an SDK validation error', async () => {
+      const provider = createProvider()
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: MOCK_WALLET,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: { ...quote.execution, swapCalldata: '0x1234' as const },
+        }),
+      ).rejects.toBeInstanceOf(InvalidParamsError)
     })
 
     it('throws for exact-output swaps', async () => {

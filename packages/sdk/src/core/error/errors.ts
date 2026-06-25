@@ -239,6 +239,22 @@ export class ZeroAddressError extends ActionsError {
   }
 }
 
+/**
+ * Thrown when a swap recipient is malformed or not correctly checksummed.
+ * The encoder seam checks this before baking recipients into signed calldata.
+ */
+export class InvalidRecipientError extends ActionsError {
+  override name = 'InvalidRecipientError' as const
+  recipient: string
+
+  constructor(recipient: string) {
+    super('recipient is not a valid, checksummed address', {
+      metaMessages: [`Received: ${recipient}`],
+    })
+    this.recipient = recipient
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Slippage
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,6 +296,36 @@ export class NativeAssetAddressError extends ActionsError {
   constructor(symbol: string) {
     super(`${symbol} is a native asset and has no contract address`)
     this.symbol = symbol
+  }
+}
+
+/**
+ * Thrown when native ETH is requested on a router path that cannot settle,
+ * wrap, or unwrap it.
+ */
+export class NativeAssetNotSupportedError extends ActionsError {
+  override name = 'NativeAssetNotSupportedError' as const
+  symbol: string
+  context: string
+  operation: 'input' | 'output'
+
+  constructor(params: {
+    symbol: string
+    context: string
+    operation?: 'input' | 'output'
+  }) {
+    const operation = params.operation ?? 'input'
+    super(
+      `Native ${params.symbol} ${operation} is not supported on ${params.context}`,
+      {
+        metaMessages: [
+          `Use a wrapped-native (WETH) ${operation}, or route through a path that handles native ETH.`,
+        ],
+      },
+    )
+    this.symbol = params.symbol
+    this.context = params.context
+    this.operation = operation
   }
 }
 
@@ -328,12 +374,8 @@ export class InvalidParamsError extends ActionsError {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Thrown when a pre-built quote (swap, borrow, …) is dispatched against a
- * wallet whose address differs from the quote's `recipient`. Some routers
- * (Velodrome v2/leaf) and protocols (Morpho `supplyCollateral` / `borrow` /
- * `repay` / `withdrawCollateral`) encode the recipient or `onBehalf` address
- * directly into calldata, so silently swapping recipients would route assets
- * or position changes to the wrong account.
+ * Thrown when a pre-built quote is dispatched by a different wallet than the
+ * quote recipient. Prevents calldata-bound assets or positions routing wrong.
  */
 export class QuoteRecipientMismatchError extends ActionsError {
   override name = 'QuoteRecipientMismatchError' as const
@@ -346,6 +388,47 @@ export class QuoteRecipientMismatchError extends ActionsError {
     )
     this.quoteRecipient = params.quoteRecipient
     this.walletAddress = params.walletAddress
+  }
+}
+
+/**
+ * Thrown when quote metadata matches the wallet but calldata routes elsewhere.
+ * Re-deriving the recipient from signed bytes catches tampered quote metadata.
+ */
+export class QuoteCalldataRecipientMismatchError extends ActionsError {
+  override name = 'QuoteCalldataRecipientMismatchError' as const
+  calldataRecipient: string
+  walletAddress: string
+
+  constructor(params: { calldataRecipient: string; walletAddress: string }) {
+    super(
+      `Quote calldata routes output to ${params.calldataRecipient}, not the expected recipient (${params.walletAddress}); re-quote so calldata is bound to the expected recipient`,
+    )
+    this.calldataRecipient = params.calldataRecipient
+    this.walletAddress = params.walletAddress
+  }
+}
+
+/**
+ * Thrown when provider-owned quote execution fields no longer match metadata.
+ * Catches tampered router targets, value, routes, pools, or provider context.
+ */
+export class QuoteExecutionMismatchError extends ActionsError {
+  override name = 'QuoteExecutionMismatchError' as const
+  field: string
+  expected: string
+  received: string
+
+  constructor(params: { field: string; expected: string; received: string }) {
+    super(`Quote execution field ${params.field} does not match the quote`, {
+      metaMessages: [
+        `Expected: ${params.expected}`,
+        `Received: ${params.received}`,
+      ],
+    })
+    this.field = params.field
+    this.expected = params.expected
+    this.received = params.received
   }
 }
 

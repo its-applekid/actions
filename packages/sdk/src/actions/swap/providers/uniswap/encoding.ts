@@ -1,5 +1,7 @@
 import type { Address, Hex, PublicClient } from 'viem'
 import {
+  decodeAbiParameters,
+  decodeFunctionData,
   encodeAbiParameters,
   encodeFunctionData,
   formatUnits,
@@ -7,6 +9,7 @@ import {
   zeroAddress,
 } from 'viem'
 
+import { decodeQuoteCalldata } from '@/actions/swap/core/quoteIntegrity.js'
 import {
   CURRENCY_AMOUNT_PARAMS,
   EXACT_INPUT_SINGLE_PARAMS,
@@ -14,12 +17,15 @@ import {
   EXTSLOAD_ABI,
   POOL_KEY_ABI_TYPE,
   QUOTER_ABI,
+  TAKE_PARAMS,
   UNIVERSAL_ROUTER_ABI,
 } from '@/actions/swap/providers/uniswap/abis.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { InvalidParamsError } from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 import type { SwapPrice, SwapRoute } from '@/types/swap/index.js'
 import { getAssetAddress, isNativeAsset } from '@/utils/assets.js'
+import { assertChecksummedRecipient } from '@/utils/validation.js'
 
 /**
  * V4 represents native ETH as address(0) in pool keys and settle/take params,
@@ -122,7 +128,7 @@ export async function getQuote(params: GetQuoteParams): Promise<SwapPrice> {
 
   const isExactInput = amountInRaw !== undefined
 
-  // Read pool mid-price and quote in parallel — no extra sequential RPC call
+  // Read pool mid-price and quote in parallel, no extra sequential RPC call
   const [sqrtPriceX96, quoteResult] = await Promise.all([
     getPoolSqrtPrice({ publicClient, poolManagerAddress, poolKey }),
     isExactInput
@@ -193,6 +199,8 @@ export async function getQuote(params: GetQuoteParams): Promise<SwapPrice> {
 
 export interface EncodeSwapParams {
   amountInRaw?: bigint
+  /** Exact-output maximum input amount after slippage. */
+  amountInMaximumRaw?: bigint
   amountOutRaw?: bigint
   assetIn: Asset
   assetOut: Asset
@@ -208,6 +216,23 @@ export interface EncodeSwapParams {
   tickSpacing: number
 }
 
+export interface UniversalRouterSwapSummary {
+  recipient: Address
+  currencyIn: Address
+  currencyOut: Address
+  settleCurrency: Address
+  takeCurrency: Address
+  inputAmountRaw: bigint
+  outputAmountRaw: bigint
+  settleAmountRaw: bigint
+  takeAmountRaw: bigint
+  amountInMaximumRaw?: bigint
+  amountOutMinimumRaw?: bigint
+  fee: number
+  tickSpacing: number
+  hooks: Address
+}
+
 // V4 Universal Router command
 const V4_SWAP = 0x10
 
@@ -215,7 +240,23 @@ const V4_SWAP = 0x10
 const SWAP_EXACT_IN_SINGLE = 0x06
 const SWAP_EXACT_OUT_SINGLE = 0x08
 const SETTLE_ALL = 0x0c
-const TAKE_ALL = 0x0f
+const TAKE = 0x0e
+const BPS_DENOMINATOR = 10000n
+
+/** V4 TAKE amount sentinel: take the full positive output delta. */
+const OPEN_DELTA = 0n
+
+/**
+ * Calculate the executable max input for exact-output V4 swaps after slippage.
+ * @returns Slippage-expanded maximum input amount.
+ */
+export function calculateExactOutputAmountInMaximumRaw(
+  amountInRaw: bigint,
+  slippage: number,
+): bigint {
+  const slippageBps = BigInt(Math.round(slippage * Number(BPS_DENOMINATOR)))
+  return amountInRaw + (amountInRaw * slippageBps) / BPS_DENOMINATOR
+}
 
 /**
  * Encode Universal Router V4 swap calldata
@@ -233,6 +274,9 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
     fee,
     tickSpacing,
   } = params
+
+  // Validate before signing so malformed recipients never enter calldata.
+  const recipient = assertChecksummedRecipient(params.recipient)
 
   const { tokenIn, tokenOut, zeroForOne, poolKey } = resolvePoolParams(
     assetIn,
@@ -252,7 +296,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       (quote.amountOutRaw * BigInt(Math.round((1 - slippage) * 10000))) / 10000n
 
     actions =
-      `0x${[SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
+      `0x${[SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
 
     actionParams = [
       encodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, [
@@ -265,15 +309,15 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
         },
       ]),
       encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenIn, amountInRaw]),
-      encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenOut, minAmountOut]),
+      encodeAbiParameters(TAKE_PARAMS, [tokenOut, recipient, OPEN_DELTA]),
     ]
   } else {
     const maxAmountIn =
-      quote.amountInRaw +
-      (quote.amountInRaw * BigInt(Math.round(slippage * 10000))) / 10000n
+      params.amountInMaximumRaw ??
+      calculateExactOutputAmountInMaximumRaw(quote.amountInRaw, slippage)
 
     actions =
-      `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
+      `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
 
     actionParams = [
       encodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, [
@@ -286,10 +330,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
         },
       ]),
       encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenIn, maxAmountIn]),
-      encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [
-        tokenOut,
-        quote.amountOutRaw,
-      ]),
+      encodeAbiParameters(TAKE_PARAMS, [tokenOut, recipient, OPEN_DELTA]),
     ]
   }
 
@@ -308,6 +349,163 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       BigInt(deadline),
     ],
   })
+}
+
+/**
+ * Recover the recipient encoded in a V4 Universal Router swap's TAKE params.
+ * @returns The recipient address baked into the signed calldata.
+ * @throws InvalidParamsError when calldata is not a single V4 swap ending in TAKE.
+ */
+export function decodeUniversalRouterRecipient(swapCalldata: Hex): Address {
+  return decodeUniversalRouterSwapSummary(swapCalldata).recipient
+}
+
+export function decodeUniversalRouterSwapSummary(
+  swapCalldata: Hex,
+): UniversalRouterSwapSummary {
+  return decodeQuoteCalldata({
+    expected: 'single Uniswap V4 Universal Router swap calldata',
+    decode: () => {
+      const { args } = decodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        data: swapCalldata,
+      })
+      const [commands, inputs] = args
+      if (commands !== `0x${V4_SWAP.toString(16).padStart(2, '0')}`) {
+        throw new InvalidParamsError({
+          param: 'swapCalldata',
+          expected: 'Universal Router V4_SWAP command calldata',
+          received: commands,
+        })
+      }
+      if (inputs.length !== 1) {
+        throw new InvalidParamsError({
+          param: 'swapCalldata',
+          expected: 'Universal Router V4_SWAP calldata with one input payload',
+          received: `${inputs.length} input payloads`,
+        })
+      }
+      const [actions, actionParams] = decodeAbiParameters(
+        [{ type: 'bytes' }, { type: 'bytes[]' }],
+        inputs[0],
+      )
+
+      const parsedActions = parseActionBytes(actions.slice(2))
+      validateV4Actions(actions, parsedActions)
+      if (actionParams.length !== parsedActions.length) {
+        throw new InvalidParamsError({
+          param: 'swapCalldata',
+          expected: 'one V4 params payload per action',
+          received: `${actionParams.length} params for ${parsedActions.length} actions`,
+        })
+      }
+
+      const decodedSwap = decodeSwapActionParams(
+        parsedActions[0],
+        actionParams[0],
+      )
+      const [settleCurrency, settleAmountRaw] = decodeAbiParameters(
+        CURRENCY_AMOUNT_PARAMS,
+        actionParams[1],
+      )
+      const [takeCurrency, recipient, takeAmountRaw] = decodeAbiParameters(
+        TAKE_PARAMS,
+        actionParams[2],
+      )
+      const currencyIn = decodedSwap.zeroForOne
+        ? decodedSwap.poolKey.currency0
+        : decodedSwap.poolKey.currency1
+      const currencyOut = decodedSwap.zeroForOne
+        ? decodedSwap.poolKey.currency1
+        : decodedSwap.poolKey.currency0
+
+      return {
+        recipient,
+        currencyIn,
+        currencyOut,
+        settleCurrency,
+        takeCurrency,
+        inputAmountRaw: decodedSwap.inputAmountRaw,
+        outputAmountRaw: decodedSwap.outputAmountRaw,
+        settleAmountRaw,
+        takeAmountRaw,
+        amountInMaximumRaw: decodedSwap.amountInMaximumRaw,
+        amountOutMinimumRaw: decodedSwap.amountOutMinimumRaw,
+        fee: decodedSwap.poolKey.fee,
+        tickSpacing: decodedSwap.poolKey.tickSpacing,
+        hooks: decodedSwap.poolKey.hooks,
+      }
+    },
+  })
+}
+
+function decodeSwapActionParams(
+  action: number,
+  params: Hex,
+): {
+  poolKey: ResolvedPoolParams['poolKey']
+  zeroForOne: boolean
+  inputAmountRaw: bigint
+  outputAmountRaw: bigint
+  amountInMaximumRaw?: bigint
+  amountOutMinimumRaw?: bigint
+} {
+  if (action === SWAP_EXACT_IN_SINGLE) {
+    const [swapParams] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, params)
+    return {
+      poolKey: swapParams.poolKey,
+      zeroForOne: swapParams.zeroForOne,
+      inputAmountRaw: swapParams.amountIn,
+      outputAmountRaw: swapParams.amountOutMinimum,
+      amountOutMinimumRaw: swapParams.amountOutMinimum,
+    }
+  }
+  const [swapParams] = decodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, params)
+  return {
+    poolKey: swapParams.poolKey,
+    zeroForOne: swapParams.zeroForOne,
+    inputAmountRaw: swapParams.amountInMaximum,
+    outputAmountRaw: swapParams.amountOut,
+    amountInMaximumRaw: swapParams.amountInMaximum,
+  }
+}
+
+function validateV4Actions(
+  actions: Hex,
+  parsedActions: readonly number[],
+): void {
+  const exactInActions = [SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE]
+  const exactOutActions = [SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE]
+  if (actionsEqual(parsedActions, exactInActions, exactOutActions)) return
+  throw new InvalidParamsError({
+    param: 'swapCalldata',
+    expected: 'V4 exact-in or exact-out action list ending in TAKE',
+    received: actions,
+  })
+}
+
+function parseActionBytes(actionBytes: string): number[] {
+  return Array.from({ length: actionBytes.length / 2 }, (_, i) =>
+    parseInt(actionBytes.slice(i * 2, i * 2 + 2), 16),
+  )
+}
+
+function actionsEqual(
+  actual: readonly number[],
+  exactIn: readonly number[],
+  exactOut: readonly number[],
+): boolean {
+  return matchesActions(actual, exactIn) || matchesActions(actual, exactOut)
+}
+
+function matchesActions(
+  actual: readonly number[],
+  expected: readonly number[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((action, index) => action === expected[index])
+  )
 }
 
 function calculatePrice(
@@ -355,7 +553,7 @@ export async function getPoolSqrtPrice(params: {
     ]),
   )
 
-  // pools[poolId].slot0 — slot0 is at offset 0 from the mapping base
+  // pools[poolId].slot0: slot0 is at offset 0 from the mapping base
   const slot = keccak256(
     encodeAbiParameters(
       [{ type: 'bytes32' }, { type: 'uint256' }],

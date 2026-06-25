@@ -1,9 +1,16 @@
-import { isAddressEqual } from 'viem'
+import { type Address, isAddressEqual } from 'viem'
 
 import { QUOTE_DISCRIMINATOR } from '@/actions/shared/quoteDiscriminator.js'
 import { BaseSwapNamespace } from '@/actions/swap/namespaces/BaseSwapNamespace.js'
+import { decodeUniversalRouterRecipient } from '@/actions/swap/providers/uniswap/encoding.js'
+import { decodePoolSwapRecipient } from '@/actions/swap/providers/velodrome/encoding/index.js'
+import { UNISWAP, VELODROME } from '@/constants/providers.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { QuoteRecipientMismatchError } from '@/core/error/errors.js'
+import {
+  InvalidParamsError,
+  QuoteCalldataRecipientMismatchError,
+  QuoteRecipientMismatchError,
+} from '@/core/error/errors.js'
 import type { SwapExecuteParamsResolved } from '@/services/nameservices/ens/types.js'
 import type { RecipientResolver } from '@/services/nameservices/ens/utils.js'
 import type { SwapSettings } from '@/types/actions.js'
@@ -57,11 +64,9 @@ export class WalletSwapNamespace extends BaseSwapNamespace {
   /**
    * Execute a token swap.
    * Accepts either raw params (re-quotes internally) or a pre-built SwapQuote
-   * (skips re-quoting). When a pre-built quote is passed, its recipient must
-   * equal this wallet's address; otherwise the calldata would route output
-   * tokens to a different address (a real risk on Velodrome v2/leaf paths
-   * where the recipient is encoded directly into the swap call). Re-quote via
-   * `wallet.swap.getQuote(...)` to bind the quote to this wallet.
+   * (skips re-quoting). When a pre-built quote is passed, both its metadata
+   * recipient and calldata recipient must equal this wallet's address. Re-quote
+   * via `wallet.swap.getQuote(...)` to bind the quote to this wallet.
    * @param params - Swap parameters or a pre-built SwapQuote from getQuote()
    * @returns Swap receipt with transaction details
    * @throws If `params` is a SwapQuote whose recipient differs from this wallet
@@ -85,10 +90,10 @@ export class WalletSwapNamespace extends BaseSwapNamespace {
   }
 
   /**
-   * Validate that a pre-built quote is bound to this wallet. Throws when the
-   * quote's recipient differs from `wallet.address`; silently swapping
-   * recipients would route output tokens to the wrong address on routers that
-   * encode the recipient directly into calldata (e.g. Velodrome v2/leaf).
+   * Validate that a pre-built quote is bound to this wallet. The metadata
+   * recipient check preserves the current approval-owner binding, while the
+   * calldata check catches tampered quotes whose signed bytes route output to
+   * another address.
    */
   private requireQuoteForThisWallet(quote: SwapQuote): SwapQuote {
     if (!isAddressEqual(quote.recipient, this.wallet.address)) {
@@ -97,7 +102,31 @@ export class WalletSwapNamespace extends BaseSwapNamespace {
         walletAddress: this.wallet.address,
       })
     }
+    const calldataRecipient = this.decodeQuoteRecipient(quote)
+    if (!isAddressEqual(calldataRecipient, this.wallet.address)) {
+      throw new QuoteCalldataRecipientMismatchError({
+        calldataRecipient,
+        walletAddress: this.wallet.address,
+      })
+    }
     return quote
+  }
+
+  private decodeQuoteRecipient(quote: SwapQuote): Address {
+    if (quote.provider === UNISWAP) {
+      return decodeUniversalRouterRecipient(quote.execution.swapCalldata)
+    }
+    if (quote.provider === VELODROME) {
+      return decodePoolSwapRecipient(
+        quote.execution.swapCalldata,
+        quote.execution.providerContext,
+      )
+    }
+    throw new InvalidParamsError({
+      param: 'provider',
+      expected: 'a swap provider with decodable recipient calldata',
+      received: quote.provider,
+    })
   }
 
   /**

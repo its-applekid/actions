@@ -9,12 +9,16 @@ import {
   EmptyPositionError,
   InvalidAmountError,
   InvalidParamsError,
+  InvalidRecipientError,
   MarketIdRequiredError,
   MarketNotAllowedError,
   MarketNotFoundError,
   NativeAssetAddressError,
+  NativeAssetNotSupportedError,
   ProtocolContractsNotConfiguredError,
   ProviderNotConfiguredError,
+  QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
@@ -135,6 +139,10 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
     ],
     [InvalidParamsError, { status: 400, message: 'Invalid parameters.' }],
     [
+      InvalidRecipientError,
+      { status: 400, message: 'Invalid recipient address.' },
+    ],
+    [
       QuoteRecipientMissingError,
       { status: 400, message: 'Quote recipient is required.' },
     ],
@@ -147,6 +155,13 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
       { status: 400, message: 'Native asset cannot be referenced by address.' },
     ],
     [
+      NativeAssetNotSupportedError,
+      {
+        status: 400,
+        message: 'Native asset input is not supported for this swap route.',
+      },
+    ],
+    [
       AssetMetadataRequiredError,
       { status: 400, message: 'Asset metadata is required.' },
     ],
@@ -157,6 +172,21 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
     [
       EmptyPositionError,
       { status: 422, message: 'No position to operate on.' },
+    ],
+    [
+      QuoteCalldataRecipientMismatchError,
+      {
+        status: 403,
+        message:
+          'Quote calldata recipient does not match the executing wallet.',
+      },
+    ],
+    [
+      QuoteExecutionMismatchError,
+      {
+        status: 403,
+        message: 'Quote execution data does not match the quote.',
+      },
     ],
     [
       ProtocolContractsNotConfiguredError,

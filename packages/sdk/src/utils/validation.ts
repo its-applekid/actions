@@ -1,5 +1,5 @@
 import type { Address } from 'viem'
-import { isAddress } from 'viem'
+import { getAddress, isAddress } from 'viem'
 
 import {
   SUPPORTED_CHAIN_IDS,
@@ -13,6 +13,7 @@ import {
   ConflictingAmountsError,
   InvalidAmountError,
   InvalidParamsError,
+  InvalidRecipientError,
   QuoteExpiredError,
   SameAssetError,
   SlippageOutOfRangeError,
@@ -177,4 +178,16 @@ export function validateRecipient(recipient: string | undefined): void {
   if (recipient && isAddress(recipient)) {
     validateNotZeroAddress(recipient, 'recipient')
   }
+}
+
+/**
+ * Assert a swap recipient is valid and checksummed before calldata encoding.
+ * @returns Checksummed recipient address.
+ * @throws InvalidRecipientError when strict viem validation fails.
+ */
+export function assertChecksummedRecipient(recipient: string): Address {
+  if (!isAddress(recipient, { strict: true })) {
+    throw new InvalidRecipientError(recipient)
+  }
+  return getAddress(recipient)
 }

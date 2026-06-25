@@ -1,12 +1,20 @@
-import { formatUnits } from 'viem'
+import { formatUnits, zeroAddress } from 'viem'
 
 import { expandMarkets, findMarket } from '@/actions/swap/core/markets.js'
+import {
+  assertQuoteCalldataRecipient,
+  assertQuoteExecutionAddress,
+  assertQuoteExecutionField,
+  assertQuoteExecutionValue,
+} from '@/actions/swap/core/quoteIntegrity.js'
 import { SwapProvider } from '@/actions/swap/core/SwapProvider.js'
 import {
   getSupportedChainIds,
   getUniswapAddresses,
 } from '@/actions/swap/providers/uniswap/addresses.js'
 import {
+  calculateExactOutputAmountInMaximumRaw,
+  decodeUniversalRouterSwapSummary,
   encodeUniversalRouterSwap,
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
@@ -34,7 +42,11 @@ import type {
   SwapTransaction,
 } from '@/types/swap/index.js'
 import { resolveApprovalMode } from '@/utils/approve.js'
-import { isNativeAsset, parseAssetAmount } from '@/utils/assets.js'
+import {
+  getAssetAddress,
+  isNativeAsset,
+  parseAssetAmount,
+} from '@/utils/assets.js'
 
 /**
  * Uniswap V4 swap provider using Universal Router and Permit2 approvals.
@@ -75,8 +87,36 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
     })
     return this.buildSwapTransactions({
       ...swapQuote,
+      recipient: params.walletAddress,
       approvalMode: params.approvalMode,
     })
+  }
+
+  protected override validateQuoteExecution(quote: SwapQuote): void {
+    const addresses = getUniswapAddresses(quote.chainId)
+    const market = this.resolveUniswapConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    const decoded = decodeUniversalRouterSwapSummary(
+      quote.execution.swapCalldata,
+    )
+    assertQuoteExecutionAddress({
+      field: 'execution.routerAddress',
+      expected: addresses.universalRouter,
+      received: quote.execution.routerAddress,
+    })
+    assertQuoteExecutionValue({
+      field: 'execution.value',
+      expected: isNativeAsset(quote.assetIn) ? quote.amountInRaw : 0n,
+      received: quote.execution.value,
+    })
+    assertQuoteCalldataRecipient({
+      expectedRecipient: quote.recipient,
+      calldataRecipient: decoded.recipient,
+    })
+    this.validateDecodedQuoteRoute(quote, market, decoded)
   }
 
   protected async _buildApprovals(quote: SwapQuote) {
@@ -115,11 +155,12 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
     const { slippage, now, deadline, recipient, amountInRaw } =
       this.resolveQuoteDefaults(params)
     const amountOutRaw = parseAssetAmount(assetOut, params.amountOut)
+    const isExactOutput = amountOutRaw !== undefined
 
     const quote = await getQuote({
       assetIn,
       assetOut,
-      amountInRaw: amountOutRaw ? undefined : amountInRaw,
+      amountInRaw: isExactOutput ? undefined : amountInRaw,
       amountOutRaw,
       chainId,
       publicClient,
@@ -129,8 +170,17 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       tickSpacing: marketConfig.tickSpacing,
     })
 
+    const finalAmountInRaw = isExactOutput
+      ? calculateExactOutputAmountInMaximumRaw(quote.amountInRaw, slippage)
+      : amountInRaw
+    const finalAmountIn = parseFloat(
+      formatUnits(finalAmountInRaw, assetIn.metadata.decimals),
+    )
+    const amountInMaximumRaw = isExactOutput ? finalAmountInRaw : undefined
+
     const swapCalldata = encodeUniversalRouterSwap({
-      amountInRaw: amountOutRaw ? undefined : amountInRaw,
+      amountInRaw: isExactOutput ? undefined : amountInRaw,
+      amountInMaximumRaw,
       amountOutRaw,
       assetIn,
       assetOut,
@@ -144,8 +194,6 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       tickSpacing: marketConfig.tickSpacing,
     })
 
-    const finalAmountInRaw = amountOutRaw ? quote.amountInRaw : amountInRaw
-
     const { amountOutMinRaw, amountOutMin } = this.computeSlippageBounds(
       quote.amountOutRaw,
       slippage,
@@ -156,20 +204,20 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       assetIn,
       assetOut,
       chainId,
-      amountIn: quote.amountIn,
+      amountIn: finalAmountIn,
       amountInRaw: finalAmountInRaw,
       amountOut: quote.amountOut,
       amountOutRaw: quote.amountOutRaw,
       amountOutMin,
       amountOutMinRaw,
-      price: quote.amountOut / quote.amountIn,
-      priceInverse: quote.amountIn / quote.amountOut,
+      price: quote.amountOut / finalAmountIn,
+      priceInverse: finalAmountIn / quote.amountOut,
       priceImpact: quote.priceImpact,
       route: quote.route,
       execution: {
         swapCalldata,
         routerAddress: addresses.universalRouter,
-        value: isNativeAsset(assetIn) ? (amountInRaw ?? 0n) : 0n,
+        value: isNativeAsset(assetIn) ? finalAmountInRaw : 0n,
         providerContext: {
           fee: marketConfig.fee,
           tickSpacing: marketConfig.tickSpacing,
@@ -235,5 +283,82 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       )
     }
     return config as UniswapMarketConfig & { fee: number; tickSpacing: number }
+  }
+
+  private validateDecodedQuoteRoute(
+    quote: SwapQuote,
+    market: UniswapMarketConfig & { fee: number; tickSpacing: number },
+    decoded: ReturnType<typeof decodeUniversalRouterSwapSummary>,
+  ): void {
+    const expectedIn = this.resolveV4Currency(quote.assetIn, quote.chainId)
+    const expectedOut = this.resolveV4Currency(quote.assetOut, quote.chainId)
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.currencyIn',
+      expected: expectedIn,
+      received: decoded.currencyIn,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.currencyOut',
+      expected: expectedOut,
+      received: decoded.currencyOut,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.settleCurrency',
+      expected: expectedIn,
+      received: decoded.settleCurrency,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.takeCurrency',
+      expected: expectedOut,
+      received: decoded.takeCurrency,
+    })
+    assertQuoteExecutionValue({
+      field: 'swapCalldata.inputAmountRaw',
+      expected: quote.amountInRaw,
+      received: decoded.inputAmountRaw,
+    })
+    assertQuoteExecutionValue({
+      field: 'swapCalldata.settleAmountRaw',
+      expected: quote.amountInRaw,
+      received: decoded.settleAmountRaw,
+    })
+    if (decoded.amountInMaximumRaw !== undefined) {
+      assertQuoteExecutionValue({
+        field: 'swapCalldata.amountInMaximumRaw',
+        expected: quote.amountInRaw,
+        received: decoded.amountInMaximumRaw,
+      })
+      assertQuoteExecutionValue({
+        field: 'swapCalldata.outputAmountRaw',
+        expected: quote.amountOutRaw,
+        received: decoded.outputAmountRaw,
+      })
+    }
+    if (decoded.amountOutMinimumRaw !== undefined) {
+      assertQuoteExecutionValue({
+        field: 'swapCalldata.amountOutMinimumRaw',
+        expected: quote.amountOutMinRaw,
+        received: decoded.amountOutMinimumRaw,
+      })
+    }
+    assertQuoteExecutionField({
+      field: 'swapCalldata.fee',
+      expected: market.fee,
+      received: decoded.fee,
+    })
+    assertQuoteExecutionField({
+      field: 'swapCalldata.tickSpacing',
+      expected: market.tickSpacing,
+      received: decoded.tickSpacing,
+    })
+    assertQuoteExecutionAddress({
+      field: 'swapCalldata.hooks',
+      expected: zeroAddress,
+      received: decoded.hooks,
+    })
+  }
+
+  private resolveV4Currency(asset: Asset, chainId: SupportedChainId) {
+    return isNativeAsset(asset) ? zeroAddress : getAssetAddress(asset, chainId)
   }
 }

@@ -2,6 +2,8 @@ import {
   type Address,
   decodeAbiParameters,
   decodeFunctionData,
+  encodeAbiParameters,
+  encodeFunctionData,
   type PublicClient,
   zeroAddress,
 } from 'viem'
@@ -10,10 +12,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/uniswap/abis.js'
 import {
   calculatePriceImpact,
+  decodeUniversalRouterRecipient,
   encodeUniversalRouterSwap,
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import {
+  InvalidParamsError,
+  InvalidRecipientError,
+} from '@/core/error/errors.js'
 import type { Asset } from '@/types/asset.js'
 
 const USDC: Asset = {
@@ -40,6 +47,12 @@ const CHAIN_ID = 84532 as SupportedChainId
 const FEE = 100
 const TICK_SPACING = 2
 
+// Distinct, correctly-checksummed addresses for recipient-routing assertions.
+const RECIPIENT = '0x000000000000000000000000000000000000dEaD' as Address
+const OTHER_RECIPIENT = '0x1234567890123456789012345678901234567890' as Address
+const BAD_CHECKSUM_RECIPIENT =
+  '0x000000000000000000000000000000000000DeAd' as Address
+
 // Mock sqrtPriceX96 for a ~2000 USDC/WETH pool
 // sqrtPriceX96 = sqrt(price) * 2^96, where price = WETH/USDC adjusted for decimals
 // For 1 WETH = 2000 USDC: price(token0→token1) depends on sort order
@@ -56,6 +69,37 @@ function createMockPublicClient(
     }),
     readContract: vi.fn().mockResolvedValue(MOCK_SQRT_PRICE),
   } as unknown as PublicClient
+}
+
+type SimulatedQuoteParams = {
+  poolKey: { currency0: Address; currency1: Address }
+}
+
+function getFirstSimulatedQuoteParams(
+  publicClient: PublicClient,
+): SimulatedQuoteParams {
+  const call = vi.mocked(publicClient.simulateContract).mock.calls[0]?.[0]
+  if (!hasSimulatedQuoteParams(call)) {
+    throw new Error('Expected simulateContract call with quote params')
+  }
+  return call.args[0]
+}
+
+function hasSimulatedQuoteParams(
+  call: unknown,
+): call is { args: readonly [SimulatedQuoteParams] } {
+  if (!isRecord(call) || !Array.isArray(call.args)) return false
+  return isSimulatedQuoteParams(call.args[0])
+}
+
+function isSimulatedQuoteParams(value: unknown): value is SimulatedQuoteParams {
+  if (!isRecord(value) || !isRecord(value.poolKey)) return false
+  const { currency0, currency1 } = value.poolKey
+  return typeof currency0 === 'string' && typeof currency1 === 'string'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 describe('getQuote', () => {
@@ -137,8 +181,7 @@ describe('getQuote', () => {
       tickSpacing: TICK_SPACING,
     })
 
-    const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
+    const args = getFirstSimulatedQuoteParams(publicClient)
     // currency0 should be the lower address
     expect(
       args.poolKey.currency0.toLowerCase() <
@@ -160,8 +203,7 @@ describe('getQuote', () => {
       tickSpacing: TICK_SPACING,
     })
 
-    const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
+    const args = getFirstSimulatedQuoteParams(publicClient)
     // Native ETH should be address(0), sorted as currency0 (lowest possible address)
     expect(args.poolKey.currency0).toBe(zeroAddress)
   })
@@ -180,8 +222,7 @@ describe('getQuote', () => {
       tickSpacing: TICK_SPACING,
     })
 
-    const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
+    const args = getFirstSimulatedQuoteParams(publicClient)
     // Native ETH should be address(0) regardless of swap direction
     expect(args.poolKey.currency0).toBe(zeroAddress)
   })
@@ -235,7 +276,7 @@ describe('calculatePriceImpact', () => {
     const impact = calculatePriceImpact({
       sqrtPriceX96: MID_SQRT_PRICE,
       amountIn: 100000000n,
-      amountOut: 600000000000000000n, // 0.6 WETH — better than ~0.5 mid
+      amountOut: 600000000000000000n, // 0.6 WETH, better than ~0.5 mid
       zeroForOne: true,
     })
 
@@ -278,7 +319,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -297,7 +338,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -316,6 +357,7 @@ describe('encodeUniversalRouterSwap', () => {
     // bare-reverted on pool lookup. Correct codes:
     //   0x06 SWAP_EXACT_IN_SINGLE
     //   0x08 SWAP_EXACT_OUT_SINGLE
+    //   0x0c SETTLE_ALL; 0x0e TAKE routes output to the recipient.
     const decodeActions = (calldata: `0x${string}`): `0x${string}` => {
       const { args } = decodeFunctionData({
         abi: UNIVERSAL_ROUTER_ABI,
@@ -339,14 +381,14 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
       fee: FEE,
       tickSpacing: TICK_SPACING,
     })
-    expect(decodeActions(exactIn)).toBe('0x060c0f')
+    expect(decodeActions(exactIn)).toBe('0x060c0e')
 
     const exactOut = encodeUniversalRouterSwap({
       amountOutRaw: 500000000000000000n,
@@ -354,14 +396,14 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
       fee: FEE,
       tickSpacing: TICK_SPACING,
     })
-    expect(decodeActions(exactOut)).toBe('0x080c0f')
+    expect(decodeActions(exactOut)).toBe('0x080c0e')
   })
 
   it('produces different calldata for exact-in vs exact-out', () => {
@@ -371,7 +413,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -385,7 +427,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.005,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -403,7 +445,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0,
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -417,7 +459,7 @@ describe('encodeUniversalRouterSwap', () => {
       assetOut: WETH,
       slippage: 0.05, // 5%
       deadline: 1700000000,
-      recipient: '0xrecipient' as Address,
+      recipient: RECIPIENT,
       chainId: CHAIN_ID,
       quote: baseQuote,
       universalRouterAddress: '0xrouter' as Address,
@@ -427,5 +469,100 @@ describe('encodeUniversalRouterSwap', () => {
 
     // Different slippage should produce different calldata
     expect(noSlippage).not.toBe(withSlippage)
+  })
+})
+
+describe('V4 recipient honoring', () => {
+  const baseQuote = {
+    price: '0.005',
+    priceInverse: '200',
+    amountIn: 100,
+    amountOut: 0.5,
+    amountInRaw: 100000000n,
+    amountOutRaw: 500000000000000000n,
+    priceImpact: 0.001,
+    route: { path: [USDC, WETH], pools: [] },
+    gasEstimate: 150000n,
+  }
+
+  const encode = (recipient: Address, exactOut = false) =>
+    encodeUniversalRouterSwap({
+      amountInRaw: exactOut ? undefined : 100000000n,
+      amountOutRaw: exactOut ? 500000000000000000n : undefined,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: 0.005,
+      deadline: 1700000000,
+      recipient,
+      chainId: CHAIN_ID,
+      quote: baseQuote,
+      universalRouterAddress:
+        '0x0000000000000000000000000000000000000099' as Address,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+  const decodeTakeRecipient = (calldata: `0x${string}`): Address => {
+    const { args } = decodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      data: calldata,
+    })
+    const [commands, inputs] = args
+    expect(commands).toBe('0x10')
+    const [actions, actionParams] = decodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      inputs[0]!,
+    )
+    expect(actions.endsWith('0e')).toBe(true)
+    const [, recipient] = decodeAbiParameters(
+      [
+        { name: 'currency', type: 'address' },
+        { name: 'recipient', type: 'address' },
+        { name: 'amount', type: 'uint256' },
+      ],
+      actionParams[2]!,
+    )
+    return recipient
+  }
+
+  it('encodes the requested recipient in the V4 TAKE action (exact-in)', () => {
+    const calldata = encode(RECIPIENT)
+    expect(decodeTakeRecipient(calldata)).toBe(RECIPIENT)
+  })
+
+  it('encodes the requested recipient in the V4 TAKE action (exact-out)', () => {
+    const calldata = encode(RECIPIENT, true)
+    expect(decodeTakeRecipient(calldata)).toBe(RECIPIENT)
+  })
+
+  it('routes to a non-self recipient rather than dropping to msg.sender', () => {
+    const calldata = encode(OTHER_RECIPIENT)
+    // Decoding the bytes recovers the exact output recipient.
+    expect(decodeTakeRecipient(calldata)).toBe(OTHER_RECIPIENT)
+  })
+
+  it('rejects a malformed or mis-checksummed recipient before encoding', () => {
+    expect(() => encode(BAD_CHECKSUM_RECIPIENT)).toThrow(InvalidRecipientError)
+  })
+
+  it('rejects calldata that is not a single V4 swap command', () => {
+    const calldata = encodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: [
+        '0x08',
+        [
+          encodeAbiParameters(
+            [{ type: 'bytes' }, { type: 'bytes[]' }],
+            ['0x060c0e', ['0x', '0x', '0x']],
+          ),
+        ],
+        BigInt(1700000000),
+      ],
+    })
+
+    expect(() => decodeUniversalRouterRecipient(calldata)).toThrow(
+      InvalidParamsError,
+    )
   })
 })

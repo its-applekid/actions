@@ -112,14 +112,28 @@ export const EXACT_OUTPUT_SINGLE_PARAMS = [
   },
 ] as const
 
-/** ABI type for SETTLE_ALL / TAKE_ALL params */
+/** ABI type for SETTLE_ALL params */
 export const CURRENCY_AMOUNT_PARAMS = [
   { type: 'address' },
   { type: 'uint256' },
 ] as const
 
 /**
- * PoolManager extsload ABI — reads arbitrary storage slots via SLOAD
+ * ABI type for the V4 TAKE action params: (currency, recipient, amount).
+ * Unlike TAKE_ALL, which credits msg.sender with no recipient argument,
+ * TAKE routes the swap output to an explicit `recipient`. `amount` is the
+ * OPEN_DELTA sentinel (0) so the router takes the full positive output delta;
+ * slippage is still enforced by the swap action's `amountOutMinimum`.
+ * @see https://github.com/Uniswap/v4-periphery/blob/main/src/libraries/Actions.sol
+ */
+export const TAKE_PARAMS = [
+  { name: 'currency', type: 'address' },
+  { name: 'recipient', type: 'address' },
+  { name: 'amount', type: 'uint256' },
+] as const
+
+/**
+ * PoolManager extsload ABI, reads arbitrary storage slots via SLOAD
  * @see https://docs.uniswap.org/contracts/v4/guides/read-pool-state
  */
 export const EXTSLOAD_ABI = [

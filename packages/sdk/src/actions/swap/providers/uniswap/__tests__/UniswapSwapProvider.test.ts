@@ -1,15 +1,27 @@
-import type { Address, PublicClient } from 'viem'
+import { type Address, decodeFunctionData, type PublicClient } from 'viem'
 import { baseSepolia } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
 import { MockWETHAsset } from '@/__mocks__/MockAssets.js'
+import {
+  decodeUniversalRouterRecipient,
+  decodeUniversalRouterSwapSummary,
+} from '@/actions/swap/providers/uniswap/encoding.js'
 import type { UniswapSwapProviderConfig } from '@/actions/swap/providers/uniswap/types.js'
 import { UniswapSwapProvider } from '@/actions/swap/providers/uniswap/UniswapSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import {
+  InvalidParamsError,
+  QuoteCalldataRecipientMismatchError,
+  QuoteExecutionMismatchError,
+} from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { Asset } from '@/types/asset.js'
+import { PERMIT2_ABI } from '@/utils/abi/permit2.js'
 
 const CHAIN_ID = baseSepolia.id as SupportedChainId
+const QUOTED_EXACT_OUTPUT_INPUT_RAW = 500000000000000000n
+const EXACT_OUTPUT_INPUT_MAX_RAW = 502500000000000000n
 
 const USDC: Asset = {
   type: 'erc20',
@@ -27,10 +39,16 @@ const OP: Asset = {
   metadata: { name: 'Optimism', symbol: 'OP', decimals: 18 },
 }
 
+const ETH: Asset = {
+  type: 'native',
+  address: { [CHAIN_ID]: 'native' },
+  metadata: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+}
+
 function createMockChainManager(): ChainManager {
   const mockPublicClient = {
     simulateContract: vi.fn().mockResolvedValue({
-      result: [500000000000000000n, 150000n],
+      result: [QUOTED_EXACT_OUTPUT_INPUT_RAW, 150000n],
     }),
     readContract: vi
       .fn()
@@ -56,6 +74,7 @@ function createMockChainManager(): ChainManager {
 
 function createProvider(
   configOverrides?: Partial<UniswapSwapProviderConfig>,
+  chainManager: ChainManager = createMockChainManager(),
 ): UniswapSwapProvider {
   const config: UniswapSwapProviderConfig = {
     defaultSlippage: 0.005,
@@ -64,7 +83,17 @@ function createProvider(
     ],
     ...configOverrides,
   }
-  return new UniswapSwapProvider(config, createMockChainManager())
+  return new UniswapSwapProvider(config, chainManager)
+}
+
+function decodePermit2ApprovalAmount(data: `0x${string}`): bigint {
+  const decoded = decodeFunctionData({ abi: PERMIT2_ABI, data })
+  if (decoded.functionName !== 'approve') {
+    throw new Error(
+      `Expected Permit2 approve, received ${decoded.functionName}`,
+    )
+  }
+  return decoded.args[2]
 }
 
 describe('UniswapSwapProvider', () => {
@@ -107,6 +136,188 @@ describe('UniswapSwapProvider', () => {
       // Mock readContract returns 0n (no allowance), so approvals should be needed
       expect(result.transactionData.tokenApproval).toBeDefined()
       expect(result.transactionData.permit2Approval).toBeDefined()
+    })
+
+    it('routes output to requested recipient while checking wallet allowance', async () => {
+      const chainManager = createMockChainManager()
+      const provider = createProvider(undefined, chainManager)
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const recipient = '0x5555555555555555555555555555555555555555' as Address
+
+      const result = await provider.execute({
+        amountIn: 100,
+        assetIn: USDC,
+        assetOut: OP,
+        chainId: CHAIN_ID,
+        walletAddress,
+        recipient,
+      })
+
+      expect(
+        decodeUniversalRouterRecipient(result.transactionData.swap.data),
+      ).toBe(recipient)
+
+      const publicClient = chainManager.getPublicClient(
+        CHAIN_ID,
+      ) as unknown as PublicClient
+      expect(publicClient.readContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'allowance',
+          args: [walletAddress, USDC.address[CHAIN_ID], expect.any(String)],
+        }),
+      )
+    })
+
+    it('rejects pre-built quotes whose calldata routes to a different recipient', async () => {
+      const provider = createProvider()
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const attackerRecipient =
+        '0x5555555555555555555555555555555555555555' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+      const attackerQuote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: attackerRecipient,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: {
+            ...quote.execution,
+            swapCalldata: attackerQuote.execution.swapCalldata,
+          },
+        }),
+      ).rejects.toBeInstanceOf(QuoteCalldataRecipientMismatchError)
+    })
+
+    it('rejects pre-built quotes whose calldata routes a different output token', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          {
+            assets: [USDC, OP, MockWETHAsset],
+            fee: 100,
+            tickSpacing: 2,
+            chainId: CHAIN_ID,
+          },
+        ],
+      })
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+      const wethQuote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: MockWETHAsset,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: {
+            ...quote.execution,
+            swapCalldata: wethQuote.execution.swapCalldata,
+          },
+        }),
+      ).rejects.toBeInstanceOf(QuoteExecutionMismatchError)
+    })
+
+    it('rejects malformed pre-built quote calldata with an SDK validation error', async () => {
+      const provider = createProvider()
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountIn: 100,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: { ...quote.execution, swapCalldata: '0x1234' as const },
+        }),
+      ).rejects.toBeInstanceOf(InvalidParamsError)
+    })
+
+    it('uses the exact-output max input for ERC20 calldata and Permit2 approval', async () => {
+      const provider = createProvider()
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: USDC,
+        assetOut: OP,
+        amountOut: 0.5,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      expect(quote.amountInRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(quote.execution.value).toBe(0n)
+
+      const decoded = decodeUniversalRouterSwapSummary(
+        quote.execution.swapCalldata,
+      )
+      expect(decoded.amountInMaximumRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(decoded.settleAmountRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+
+      const result = await provider.execute(quote)
+      expect(
+        decodePermit2ApprovalAmount(
+          result.transactionData.permit2Approval!.data,
+        ),
+      ).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+    })
+
+    it('uses the exact-output max input for native value and calldata', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          { assets: [ETH, OP], fee: 100, tickSpacing: 2, chainId: CHAIN_ID },
+        ],
+      })
+      const walletAddress =
+        '0x4444444444444444444444444444444444444444' as Address
+      const quote = await provider.getQuote({
+        assetIn: ETH,
+        assetOut: OP,
+        amountOut: 0.5,
+        chainId: CHAIN_ID,
+        recipient: walletAddress,
+      })
+
+      expect(quote.amountInRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(quote.execution.value).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+
+      const decoded = decodeUniversalRouterSwapSummary(
+        quote.execution.swapCalldata,
+      )
+      expect(decoded.amountInMaximumRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(decoded.settleAmountRaw).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+
+      const result = await provider.execute(quote)
+      expect(result.transactionData.swap.value).toBe(EXACT_OUTPUT_INPUT_MAX_RAW)
+      expect(result.transactionData.tokenApproval).toBeUndefined()
+      expect(result.transactionData.permit2Approval).toBeUndefined()
     })
 
     it('throws without fee/tickSpacing in market filter', async () => {

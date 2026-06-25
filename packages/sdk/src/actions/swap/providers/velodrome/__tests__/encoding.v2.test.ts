@@ -1,5 +1,9 @@
 import type { Address, Hex } from 'viem'
-import { decodeAbiParameters } from 'viem'
+import {
+  decodeAbiParameters,
+  encodeAbiParameters,
+  encodeFunctionData,
+} from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -12,8 +16,18 @@ import {
   UNIVERSAL_ROUTER_ABI,
   V2_ROUTER_ABI,
 } from '@/actions/swap/providers/velodrome/abis.js'
-import { encodeSwap } from '@/actions/swap/providers/velodrome/encoding/index.js'
+import {
+  decodeRouterSwapRecipient,
+  decodeSwapRecipient,
+  decodeUniversalV2SwapRecipient,
+  encodeSwap,
+} from '@/actions/swap/providers/velodrome/encoding/index.js'
 import { V2_SWAP_EXACT_IN_INPUT_PARAMS } from '@/actions/swap/providers/velodrome/encoding/routers/v2.js'
+import {
+  InvalidParamsError,
+  InvalidRecipientError,
+  NativeAssetNotSupportedError,
+} from '@/core/error/errors.js'
 
 import {
   BASE_CHAIN_ID,
@@ -23,6 +37,10 @@ import {
   OP_CHAIN_ID,
   RECIPIENT,
 } from './encoding.helpers.js'
+
+const BAD_CHECKSUM_RECIPIENT =
+  '0x000000000000000000000000000000000000DeAd' as Address
+const OTHER_RECIPIENT = '0x1111111111111111111111111111111111111111' as Address
 
 describe('encodeSwap', () => {
   describe('v2 router', () => {
@@ -56,6 +74,7 @@ describe('encodeSwap', () => {
       expect(args[2][0].factory).toBe(FACTORY)
       expect(args[2][0].stable).toBe(false)
       expect(args[3]).toBe(RECIPIENT)
+      expect(decodeRouterSwapRecipient(data, 'v2')).toBe(RECIPIENT)
     })
 
     it('encodes swapExactETHForTokens for native input', () => {
@@ -85,6 +104,7 @@ describe('encodeSwap', () => {
       expect(args[0]).toBe(900000n)
       expect(args[1]).toHaveLength(1)
       expect(args[1][0].from).toBe('0x4200000000000000000000000000000000000006')
+      expect(decodeRouterSwapRecipient(data, 'v2')).toBe(RECIPIENT)
     })
 
     it('encodes swapExactTokensForETH for native output', () => {
@@ -103,6 +123,24 @@ describe('encodeSwap', () => {
 
       const { functionName } = decode(V2_ROUTER_ABI, data)
       expect(functionName).toBe('swapExactTokensForETH')
+      expect(decodeRouterSwapRecipient(data, 'v2')).toBe(RECIPIENT)
+    })
+
+    it('rejects a malformed or mis-checksummed recipient before encoding', () => {
+      expect(() =>
+        encodeSwap({
+          assetIn: MockUSDCAsset,
+          assetOut: MockWETHAsset,
+          amountInRaw: 1000000n,
+          amountOutMin: 400000000000000000n,
+          routerType: 'v2',
+          stable: false,
+          factoryAddress: FACTORY,
+          recipient: BAD_CHECKSUM_RECIPIENT,
+          deadline: DEADLINE,
+          chainId: OP_CHAIN_ID,
+        }),
+      ).toThrow(InvalidRecipientError)
     })
   })
 
@@ -131,6 +169,7 @@ describe('encodeSwap', () => {
       expect(args[2]).toHaveLength(1)
       expect(args[2][0].stable).toBe(false)
       expect((args[2][0] as Record<string, unknown>).factory).toBeUndefined()
+      expect(decodeRouterSwapRecipient(data, 'leaf')).toBe(RECIPIENT)
     })
 
     it('encodes swapExactETHForTokens for native input', () => {
@@ -149,6 +188,7 @@ describe('encodeSwap', () => {
 
       const { functionName } = decode(LEAF_ROUTER_ABI, data)
       expect(functionName).toBe('swapExactETHForTokens')
+      expect(decodeRouterSwapRecipient(data, 'leaf')).toBe(RECIPIENT)
     })
 
     it('encodes stable pool swap', () => {
@@ -171,6 +211,24 @@ describe('encodeSwap', () => {
         data,
       )
       expect(args[2][0].stable).toBe(true)
+      expect(decodeRouterSwapRecipient(data, 'leaf')).toBe(RECIPIENT)
+    })
+
+    it('rejects a malformed recipient before leaf router encoding', () => {
+      expect(() =>
+        encodeSwap({
+          assetIn: MockUSDCAsset,
+          assetOut: MockWETHAsset,
+          amountInRaw: 1000000n,
+          amountOutMin: 400000000000000000n,
+          routerType: 'leaf',
+          stable: false,
+          factoryAddress: FACTORY,
+          recipient: '0x1234' as Address,
+          deadline: DEADLINE,
+          chainId: OP_CHAIN_ID,
+        }),
+      ).toThrow(InvalidRecipientError)
     })
   })
 
@@ -198,6 +256,8 @@ describe('encodeSwap', () => {
       expect(commands).toBe('0x08')
       expect(inputs).toHaveLength(1)
       expect(deadline).toBe(BigInt(DEADLINE))
+      expect(decodeUniversalV2SwapRecipient(data)).toBe(RECIPIENT)
+      expect(decodeSwapRecipient(data, 'universal')).toBe(RECIPIENT)
     })
 
     // Regression for #438: payerIsUser must be true so the router pulls tokens via
@@ -227,6 +287,93 @@ describe('encodeSwap', () => {
         (p) => p.name === 'payerIsUser',
       )
       expect(decoded[payerIsUserIdx]).toBe(true)
+      const recipientIdx = V2_SWAP_EXACT_IN_INPUT_PARAMS.findIndex(
+        (p) => p.name === 'recipient',
+      )
+      expect(decoded[recipientIdx]).toBe(RECIPIENT)
+    })
+
+    it('routes to a non-self recipient instead of the msg.sender sentinel', () => {
+      const data = encodeSwap({
+        assetIn: MockUSDCAsset,
+        assetOut: MockWETHAsset,
+        amountInRaw: 1000000n,
+        amountOutMin: 400000000000000000n,
+        routerType: 'universal',
+        stable: false,
+        factoryAddress: FACTORY,
+        recipient: OTHER_RECIPIENT,
+        deadline: DEADLINE,
+        chainId: BASE_CHAIN_ID,
+      })
+
+      expect(decodeUniversalV2SwapRecipient(data)).toBe(OTHER_RECIPIENT)
+    })
+
+    it('rejects calldata that is not a V2_SWAP_EXACT_IN command', () => {
+      const data = encodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        functionName: 'execute',
+        args: ['0x00', ['0x'], BigInt(DEADLINE)],
+      })
+
+      expect(() => decodeUniversalV2SwapRecipient(data)).toThrow(
+        InvalidParamsError,
+      )
+    })
+
+    it('rejects calldata that does not spend from msg.sender', () => {
+      const input = encodeAbiParameters(V2_SWAP_EXACT_IN_INPUT_PARAMS, [
+        RECIPIENT,
+        1000000n,
+        400000000000000000n,
+        '0x',
+        false,
+        false,
+      ])
+      const data = encodeFunctionData({
+        abi: UNIVERSAL_ROUTER_ABI,
+        functionName: 'execute',
+        args: ['0x08', [input], BigInt(DEADLINE)],
+      })
+
+      expect(() => decodeUniversalV2SwapRecipient(data)).toThrow(
+        InvalidParamsError,
+      )
+    })
+
+    it('rejects native input because no WRAP_ETH command is emitted', () => {
+      expect(() =>
+        encodeSwap({
+          assetIn: MockETHAsset,
+          assetOut: MockUSDCAsset,
+          amountInRaw: 1000000000000000000n,
+          amountOutMin: 900000n,
+          routerType: 'universal',
+          stable: false,
+          factoryAddress: FACTORY,
+          recipient: RECIPIENT,
+          deadline: DEADLINE,
+          chainId: BASE_CHAIN_ID,
+        }),
+      ).toThrow(NativeAssetNotSupportedError)
+    })
+
+    it('rejects native output because no UNWRAP_ETH command is emitted', () => {
+      expect(() =>
+        encodeSwap({
+          assetIn: MockUSDCAsset,
+          assetOut: MockETHAsset,
+          amountInRaw: 1000000n,
+          amountOutMin: 900000000000000000n,
+          routerType: 'universal',
+          stable: false,
+          factoryAddress: FACTORY,
+          recipient: RECIPIENT,
+          deadline: DEADLINE,
+          chainId: BASE_CHAIN_ID,
+        }),
+      ).toThrow(NativeAssetNotSupportedError)
     })
   })
 
