@@ -17,9 +17,7 @@ import { validateNotZeroAddress } from '@/utils/validation.js'
 
 /**
  * Reject missing or zero-address wallet addresses on borrow write/read calls.
- * @description Folds the two-step check (`AddressRequiredError` for
- * missing, `ZeroAddressError` for the zero literal) into a single call so
- * provider methods don't repeat the pair.
+ * Keeps provider methods from repeating the two boundary checks.
  */
 export function validateBorrowWalletAddress(
   walletAddress: `0x${string}` | undefined,
