@@ -47,6 +47,9 @@ function getUserOperationReceiptMeta(
 ): ReceiptMeta {
   return {
     hash: receipt.receipt.transactionHash ?? receipt.userOpHash,
-    status: receipt.success ? 'success' : 'reverted',
+    status:
+      receipt.success && receipt.receipt.status === 'success'
+        ? 'success'
+        : 'reverted',
   }
 }

@@ -1,4 +1,4 @@
-import type { Chain, LocalAccount, PublicClient } from 'viem'
+import type { Address, Chain, LocalAccount, PublicClient } from 'viem'
 
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import type { NodeActionsConfig } from '@/nodeActionsFactory.js'
@@ -19,7 +19,10 @@ import type {
 import type { SwapReceipt, WalletSwapParams } from '@/types/swap/index.js'
 import type { TransactionData } from '@/types/transaction.js'
 import type { AnvilFork } from '@/utils/test.js'
-import type { TransactionReturnType } from '@/wallet/core/wallets/abstract/types/index.js'
+import type {
+  BatchTransactionReturnType,
+  TransactionReturnType,
+} from '@/wallet/core/wallets/abstract/types/index.js'
 import type { NodeProviderTypes } from '@/wallet/node/providers/hosted/types/index.js'
 
 export type ForkActionsConfig<
@@ -88,19 +91,28 @@ export interface ForkBalanceEntry {
 }
 
 export interface ForkBalanceSnapshot {
-  address: `0x${string}`
+  address: Address
   balances: readonly ForkBalanceEntry[]
   chainId: SupportedChainId
 }
 
+export type ForkSnapshotAddresses = readonly [Address, ...Address[]]
+export type ForkBalanceSnapshots = readonly [
+  ForkBalanceSnapshot,
+  ...ForkBalanceSnapshot[],
+]
+
 export interface ForkScenarioContext {
   chainId: SupportedChainId
   publicClient: PublicClient
+  snapshotAddresses?: ForkSnapshotAddresses
 }
 
 export interface ForkScenarioRunResult<TResult> {
   after: ForkBalanceSnapshot
+  afterSnapshots: ForkBalanceSnapshots
   before: ForkBalanceSnapshot
+  beforeSnapshots: ForkBalanceSnapshots
   result: TResult
 }
 
@@ -110,6 +122,14 @@ export interface ForkWalletSendTarget {
     transaction: TransactionData,
     chainId: SupportedChainId,
   ) => Promise<TransactionReturnType>
+}
+
+export interface ForkWalletBatchSendTarget {
+  address: `0x${string}`
+  sendBatch: (
+    transactions: readonly TransactionData[],
+    chainId: SupportedChainId,
+  ) => Promise<BatchTransactionReturnType>
 }
 
 export interface ForkSwapTarget {
@@ -149,6 +169,11 @@ export interface ForkBorrowTarget {
 export interface ForkWalletSendScenario extends ForkScenarioContext {
   balanceAssets?: readonly Asset[]
   transaction: TransactionData
+}
+
+export interface ForkWalletBatchSendScenario extends ForkScenarioContext {
+  balanceAssets?: readonly Asset[]
+  transactions: readonly TransactionData[]
 }
 
 export interface ForkSwapScenario extends ForkScenarioContext {
