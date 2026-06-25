@@ -99,8 +99,8 @@ export class WalletSwapNamespace extends BaseSwapNamespace {
    *
    * Executor is who signs and submits the transaction (an EOA key, a
    * smart-wallet owner, or a session-key holder). The executor's address can
-   * differ from `wallet.address` — e.g. a session-key signer authoring a
-   * UserOperation for a smart wallet (see #403).
+   * differ from `wallet.address`, for example when a session-key signer
+   * authors a UserOperation for a smart wallet.
    *
    * The comparison is therefore `recipient === wallet.address`, never
    * `recipient === signer`. It stays correct regardless of who actually signed,
