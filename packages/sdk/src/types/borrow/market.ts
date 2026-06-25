@@ -6,10 +6,7 @@ import type { Asset } from '@/types/asset.js'
 
 /**
  * Identifier for a borrow market.
- * @description Tagged union designed to grow as additional protocols ship.
- * PR #3 only carries the Morpho Blue variant; Aave / Comet / Liquity / Euler
- * variants will land alongside their respective providers without breaking
- * existing callers.
+ * Tagged union designed to grow as additional protocols ship.
  */
 export type BorrowMarketId = {
   kind: 'morpho-blue'

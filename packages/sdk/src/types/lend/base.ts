@@ -341,10 +341,8 @@ export interface GetLendMarketsParams extends FilterAssetChain {
 }
 
 /**
- * Parameters for getting all of a wallet's lending positions
- * @description Optional filters for `getPositions`. Mirrors
- * `GetLendMarketsParams` for chain filtering and adds provider selection plus
- * a zero-balance filter.
+ * Optional filters for getting all of a wallet's lending positions.
+ * Mirrors market chain filters and adds provider plus zero-balance filters.
  */
 export interface GetPositionsParams {
   /** Filter to one chain (mirrors `GetLendMarketsParams.chainId`). */
