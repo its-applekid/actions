@@ -7,16 +7,8 @@ import { describe, expect, it } from 'vitest'
 import { POOL_ABI, WETH_GATEWAY_ABI } from '@/actions/shared/aave/abis/pool.js'
 
 /**
- * Independent oracle: the local hand-pinned Aave ABIs (`POOL_ABI`,
- * `WETH_GATEWAY_ABI`) are anchored against the canonical ABIs published by
- * `@aave/contract-helpers` (already in the dependency closure). The selector
- * check catches renamed functions and changed type widths. The input-list check
- * catches same-type argument reorders that leave the selector identical.
- *
- * The deep `dist/esm/.../typechain` imports are the only public path to the raw
- * factory ABIs (`@aave/contract-helpers` re-exports the service classes, not the
- * factories). If a future version restructures that layout this file breaks at
- * import time, which is a loud CI failure, not a silently disabled anchor.
+ * Anchors local Aave ABIs to @aave/contract-helpers selectors and input order.
+ * Deep factory imports are the available raw ABI source and should fail loud.
  */
 const isNamedFunction = (item: unknown, name: string): item is AbiFunction =>
   typeof item === 'object' &&
@@ -39,13 +31,7 @@ const fnOf = (abi: readonly unknown[], name: string): AbiFunction => {
 const selectorOf = (abi: readonly unknown[], name: string): `0x${string}` =>
   toFunctionSelector(fnOf(abi, name))
 
-/**
- * Assert the local input list matches the canonical one positionally. Types must
- * match at every position; names must match wherever the canonical ABI names the
- * param. The canonical typechain leaves some leading params unnamed (e.g. the
- * WETH gateway `pool` arg), so we skip the name check only at those positions,
- * while still pinning every named position against reorder.
- */
+/** Match input types and canonical names, skipping unnamed canonical params. */
 const assertInputsMatch = (
   local: readonly AbiParameter[],
   canonical: readonly AbiParameter[],
