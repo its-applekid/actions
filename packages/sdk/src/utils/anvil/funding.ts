@@ -7,13 +7,13 @@ import {
   toHex,
 } from 'viem'
 
-import { ForkE2EConfigError } from '@/utils/anvilE2E/errors.js'
-import { assertSuccessfulReceipts } from '@/utils/anvilE2E/receipts.js'
-import { requestAnvilRpc } from '@/utils/anvilE2E/rpc.js'
+import { ForkE2EConfigError } from '@/utils/anvil/errors.js'
+import { assertSuccessfulReceipts } from '@/utils/anvil/receipts.js'
+import { requestAnvilRpc } from '@/utils/anvil/rpc.js'
 import type {
   ForkTokenFunding,
   ForkWalletFunding,
-} from '@/utils/anvilE2E/types.js'
+} from '@/utils/anvil/types.js'
 
 const DEFAULT_ETH_AMOUNT_RAW = parseEther('1')
 
@@ -27,35 +27,49 @@ const DEFAULT_ETH_AMOUNT_RAW = parseEther('1')
  */
 export async function fundForkWallet(config: ForkWalletFunding): Promise<void> {
   assertAddress(config.targetAddress, 'targetAddress')
+  for (const token of config.tokens ?? []) assertFundingToken(token)
+
   await requestAnvilRpc(config.rpcUrl, 'anvil_setBalance', [
     config.targetAddress,
     toHex(config.ethAmountRaw ?? DEFAULT_ETH_AMOUNT_RAW),
   ])
   await Promise.all(
-    (config.tokens ?? []).map((token) => fundForkToken(config, token)),
+    groupTokensByWhale(config.tokens ?? []).map(({ tokens, whale }) =>
+      fundForkWhaleTokens(config, whale, tokens),
+    ),
   )
 }
 
-async function fundForkToken(
+async function fundForkWhaleTokens(
   config: ForkWalletFunding,
-  token: ForkTokenFunding,
+  whale: `0x${string}`,
+  tokens: readonly ForkTokenFunding[],
 ): Promise<void> {
-  assertAddress(token.token, 'token')
-  assertAddress(token.whale, 'whale')
   await requestAnvilRpc(config.rpcUrl, 'anvil_setBalance', [
-    token.whale,
+    whale,
     toHex(config.whaleEthAmountRaw ?? DEFAULT_ETH_AMOUNT_RAW),
   ])
-  await requestAnvilRpc(config.rpcUrl, 'anvil_impersonateAccount', [
-    token.whale,
-  ])
+  await requestAnvilRpc(config.rpcUrl, 'anvil_impersonateAccount', [whale])
   try {
-    await transferForkToken(config, token)
+    // Shared-whale transfers must keep one impersonation session alive.
+    for (const token of tokens) await transferForkToken(config, token)
   } finally {
     await requestAnvilRpc(config.rpcUrl, 'anvil_stopImpersonatingAccount', [
-      token.whale,
+      whale,
     ])
   }
+}
+
+function groupTokensByWhale(
+  tokens: readonly ForkTokenFunding[],
+): Array<{ tokens: readonly ForkTokenFunding[]; whale: `0x${string}` }> {
+  const grouped = new Map<`0x${string}`, ForkTokenFunding[]>()
+  for (const token of tokens) {
+    const group = grouped.get(token.whale) ?? []
+    group.push(token)
+    grouped.set(token.whale, group)
+  }
+  return [...grouped].map(([whale, group]) => ({ tokens: group, whale }))
 }
 
 async function transferForkToken(
@@ -82,4 +96,9 @@ function assertAddress(value: `0x${string}`, label: string): void {
   if (!isAddress(value)) {
     throw new ForkE2EConfigError(`${label} must be a valid address.`)
   }
+}
+
+function assertFundingToken(token: ForkTokenFunding): void {
+  assertAddress(token.token, 'token')
+  assertAddress(token.whale, 'whale')
 }

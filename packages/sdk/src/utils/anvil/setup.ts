@@ -3,7 +3,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 
 import type { NodeActionsConfig } from '@/nodeActionsFactory.js'
 import { createActions } from '@/nodeActionsFactory.js'
-import type { ForkActionsScenario } from '@/utils/anvilE2E/types.js'
+import type { ForkActionsScenario } from '@/utils/anvil/types.js'
 import { ANVIL_ACCOUNTS } from '@/utils/test.js'
 import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 import type { NodeProviderTypes } from '@/wallet/node/providers/hosted/types/index.js'

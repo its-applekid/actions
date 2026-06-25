@@ -1,8 +1,0 @@
-export * from '@/utils/anvilE2E/balances.js'
-export * from '@/utils/anvilE2E/errors.js'
-export * from '@/utils/anvilE2E/fork.js'
-export * from '@/utils/anvilE2E/funding.js'
-export * from '@/utils/anvilE2E/receipts.js'
-export * from '@/utils/anvilE2E/runners.js'
-export * from '@/utils/anvilE2E/setup.js'
-export type * from '@/utils/anvilE2E/types.js'

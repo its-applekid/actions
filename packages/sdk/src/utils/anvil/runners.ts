@@ -2,21 +2,24 @@ import type { Asset } from '@/types/asset.js'
 import type { BorrowReceipt } from '@/types/borrow/index.js'
 import type { LendTransactionReceipt } from '@/types/lend/index.js'
 import type { SwapReceipt } from '@/types/swap/index.js'
-import { snapshotTokenBalances } from '@/utils/anvilE2E/balances.js'
-import { ForkE2EConfigError } from '@/utils/anvilE2E/errors.js'
-import { assertSuccessfulReceipts } from '@/utils/anvilE2E/receipts.js'
+import { snapshotTokenBalances } from '@/utils/anvil/balances.js'
+import { ForkE2EConfigError } from '@/utils/anvil/errors.js'
+import { assertSuccessfulReceipts } from '@/utils/anvil/receipts.js'
 import type {
   ForkBorrowActionScenario,
   ForkBorrowScenario,
+  ForkBorrowTarget,
   ForkLendActionScenario,
   ForkLendScenario,
+  ForkLendTarget,
   ForkScenarioContext,
   ForkScenarioRunResult,
   ForkSwapScenario,
+  ForkSwapTarget,
   ForkWalletSendScenario,
-} from '@/utils/anvilE2E/types.js'
+  ForkWalletSendTarget,
+} from '@/utils/anvil/types.js'
 import type { TransactionReturnType } from '@/wallet/core/wallets/abstract/types/index.js'
-import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
 
 /**
  * Run a standard wallet send e2e scenario.
@@ -28,7 +31,7 @@ import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
  * @throws ForkE2EReceiptError when the wallet receipt is not successful.
  */
 export async function runForkWalletSendE2E(
-  wallet: Wallet,
+  wallet: ForkWalletSendTarget,
   scenario: ForkWalletSendScenario,
 ): Promise<ForkScenarioRunResult<TransactionReturnType>> {
   return runWithSnapshots(
@@ -52,7 +55,7 @@ export async function runForkWalletSendE2E(
  * @throws ForkE2EConfigError when the wallet has no swap namespace.
  */
 export async function runForkSwapProviderE2E(
-  wallet: Wallet,
+  wallet: ForkSwapTarget,
   scenario: ForkSwapScenario,
 ): Promise<ForkScenarioRunResult<SwapReceipt>> {
   return runWithSnapshots(wallet, scenario, swapAssets(scenario), async () => {
@@ -74,7 +77,7 @@ export async function runForkSwapProviderE2E(
  * @throws ForkE2EConfigError when the wallet has no lend namespace.
  */
 export async function runForkLendProviderE2E(
-  wallet: Wallet,
+  wallet: ForkLendTarget,
   scenario: ForkLendScenario,
 ): Promise<ForkScenarioRunResult<LendTransactionReceipt>> {
   return runWithSnapshots(wallet, scenario, lendAssets(scenario), async () =>
@@ -92,7 +95,7 @@ export async function runForkLendProviderE2E(
  * @throws ForkE2EConfigError when the wallet has no borrow namespace.
  */
 export async function runForkBorrowProviderE2E(
-  wallet: Wallet,
+  wallet: ForkBorrowTarget,
   scenario: ForkBorrowScenario,
 ): Promise<ForkScenarioRunResult<BorrowReceipt>> {
   return runWithSnapshots(
@@ -108,7 +111,7 @@ export async function runForkBorrowProviderE2E(
 }
 
 async function runWithSnapshots<TResult>(
-  wallet: Wallet,
+  wallet: { address: `0x${string}` },
   context: ForkScenarioContext,
   assets: readonly Asset[],
   action: () => Promise<TResult>,
@@ -143,7 +146,7 @@ function borrowAssets(scenario: ForkBorrowScenario): readonly Asset[] {
 }
 
 function executeLendScenario(
-  wallet: Wallet,
+  wallet: ForkLendTarget,
   scenario: ForkLendActionScenario,
 ): Promise<LendTransactionReceipt> {
   const lend = requireNamespace(wallet.lend, 'lend')
@@ -152,7 +155,7 @@ function executeLendScenario(
 }
 
 function executeBorrowScenario(
-  wallet: Wallet,
+  wallet: ForkBorrowTarget,
   scenario: ForkBorrowActionScenario,
 ): Promise<BorrowReceipt> {
   const borrow = requireNamespace(wallet.borrow, 'borrow')

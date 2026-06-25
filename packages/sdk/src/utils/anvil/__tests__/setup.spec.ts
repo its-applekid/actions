@@ -5,23 +5,24 @@ import {
   CHAIN_ID,
   RPC_URL,
   WALLET_ADDRESS,
-} from '@/utils/anvilE2E/__tests__/fixtures.js'
+} from '@/utils/anvil/__tests__/fixtures.js'
 import {
   buildForkActionsConfig,
   setupForkActions,
   startOrAttachAnvilFork,
-} from '@/utils/anvilE2E/index.js'
+} from '@/utils/anvil/index.js'
 import { ANVIL_ACCOUNTS } from '@/utils/test.js'
 
 const BASE_ACTIONS_CONFIG = {
   wallet: { smartWalletConfig: { provider: { type: 'default' } } },
 } satisfies Parameters<typeof buildForkActionsConfig>[0]['actionsConfig']
 
-describe('anvilE2E setup helpers', () => {
+describe('anvil setup helpers', () => {
   it('attaches to an existing Anvil fork when rpcUrl is provided', async () => {
     const harness = await startOrAttachAnvilFork({
       chain: unichain,
       chainId: CHAIN_ID,
+      mode: 'attach',
       rpcUrl: RPC_URL,
     })
 

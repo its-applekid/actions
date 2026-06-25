@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { RPC_URL, WALLET_ADDRESS } from '@/utils/anvilE2E/__tests__/fixtures.js'
-import { ForkE2EAnvilRpcError } from '@/utils/anvilE2E/index.js'
-import { requestAnvilRpc } from '@/utils/anvilE2E/rpc.js'
+import { RPC_URL, WALLET_ADDRESS } from '@/utils/anvil/__tests__/fixtures.js'
+import { ForkE2EAnvilRpcError } from '@/utils/anvil/index.js'
+import { requestAnvilRpc } from '@/utils/anvil/rpc.js'
 
 interface JsonRpcRequest {
   method: string
   params: readonly unknown[]
 }
 
-describe('anvilE2E RPC helpers', () => {
+describe('anvil RPC helpers', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -44,6 +44,16 @@ describe('anvilE2E RPC helpers', () => {
     ).rejects.toThrow(ForkE2EAnvilRpcError)
   })
 
+  it('throws a named error when Anvil returns a non-OK response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('server error', { status: 500 }),
+    )
+
+    await expect(
+      requestAnvilRpc(RPC_URL, 'anvil_setBalance', [WALLET_ADDRESS, '0x1']),
+    ).rejects.toThrow(ForkE2EAnvilRpcError)
+  })
+
   it('wraps HTTP transport failures in a named error', async () => {
     const cause = new TypeError('connection refused')
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(cause)
@@ -58,6 +68,16 @@ describe('anvilE2E RPC helpers', () => {
 
   it('wraps malformed JSON-RPC responses in a named error', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not json'))
+
+    await expect(
+      requestAnvilRpc(RPC_URL, 'anvil_setBalance', [WALLET_ADDRESS, '0x1']),
+    ).rejects.toThrow(ForkE2EAnvilRpcError)
+  })
+
+  it('wraps unexpected JSON-RPC payloads in a named error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 1, jsonrpc: '2.0' })),
+    )
 
     await expect(
       requestAnvilRpc(RPC_URL, 'anvil_setBalance', [WALLET_ADDRESS, '0x1']),

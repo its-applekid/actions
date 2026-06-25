@@ -1,6 +1,6 @@
 import type { Hex } from 'viem'
 
-import { ForkE2EReceiptError } from '@/utils/anvilE2E/errors.js'
+import { ForkE2EReceiptError } from '@/utils/anvil/errors.js'
 import type {
   BatchTransactionReturnType,
   TransactionReturnType,
@@ -47,6 +47,6 @@ function getUserOperationReceiptMeta(
 ): ReceiptMeta {
   return {
     hash: receipt.receipt.transactionHash ?? receipt.userOpHash,
-    status: receipt.receipt.status,
+    status: receipt.success ? 'success' : 'reverted',
   }
 }

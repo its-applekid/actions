@@ -1,7 +1,7 @@
 import { createPublicClient, http } from 'viem'
 
-import { ForkE2EConfigError } from '@/utils/anvilE2E/errors.js'
-import type { ForkHarness, ForkHarnessConfig } from '@/utils/anvilE2E/types.js'
+import { ForkE2EConfigError } from '@/utils/anvil/errors.js'
+import type { ForkHarness, ForkHarnessConfig } from '@/utils/anvil/types.js'
 import { startAnvilFork, stopAnvilFork } from '@/utils/test.js'
 
 /**
@@ -15,12 +15,8 @@ import { startAnvilFork, stopAnvilFork } from '@/utils/test.js'
 export async function startOrAttachAnvilFork(
   config: ForkHarnessConfig,
 ): Promise<ForkHarness> {
-  if (config.rpcUrl) return attachFork(config, config.rpcUrl)
-  if (!config.forkUrl || !config.port) {
-    throw new ForkE2EConfigError(
-      'Provide rpcUrl to attach, or forkUrl and port to start Anvil.',
-    )
-  }
+  if (config.mode === 'attach') return attachFork(config, config.rpcUrl)
+  if (config.mode !== 'start') throw new ForkE2EConfigError('Unknown mode.')
 
   const fork = await startAnvilFork(config.forkUrl, config.port)
   return {

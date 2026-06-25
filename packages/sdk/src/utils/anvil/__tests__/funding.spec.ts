@@ -9,8 +9,8 @@ import {
   TOKEN_ADDRESS,
   TX_HASH,
   WALLET_ADDRESS,
-} from '@/utils/anvilE2E/__tests__/fixtures.js'
-import { ForkE2EConfigError, fundForkWallet } from '@/utils/anvilE2E/index.js'
+} from '@/utils/anvil/__tests__/fixtures.js'
+import { fundForkWallet } from '@/utils/anvil/index.js'
 
 const writeContractMock = vi.hoisted(() => vi.fn())
 
@@ -26,7 +26,7 @@ vi.mock('viem', async (importOriginal) => {
 
 const WHALE_ADDRESS = '0x1111111111111111111111111111111111111111'
 
-describe('anvilE2E funding helpers', () => {
+describe('anvil funding helpers', () => {
   afterEach(() => {
     writeContractMock.mockReset()
     vi.restoreAllMocks()
@@ -74,18 +74,50 @@ describe('anvilE2E funding helpers', () => {
     })
   })
 
-  it('rejects invalid funding addresses before sending RPC requests', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
+  it('funds ETH without impersonating token whales', async () => {
+    const methods: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      methods.push(getJsonRpcMethod(init))
+      return rpcSuccess(true)
+    })
 
-    await expect(
-      fundForkWallet({
-        chain: unichain,
-        publicClient: createReceiptClient(),
-        rpcUrl: RPC_URL,
-        targetAddress: '0x123',
-      }),
-    ).rejects.toThrow(ForkE2EConfigError)
-    expect(fetchMock).not.toHaveBeenCalled()
+    await fundForkWallet({
+      chain: unichain,
+      publicClient: createReceiptClient(),
+      rpcUrl: RPC_URL,
+      targetAddress: WALLET_ADDRESS,
+    })
+
+    expect(methods).toEqual(['anvil_setBalance'])
+    expect(writeContractMock).not.toHaveBeenCalled()
+  })
+
+  it('serializes token funding that shares one whale', async () => {
+    const methods: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      methods.push(getJsonRpcMethod(init))
+      return rpcSuccess(true)
+    })
+    writeContractMock.mockResolvedValue(TX_HASH)
+
+    await fundForkWallet({
+      chain: unichain,
+      publicClient: createReceiptClient(),
+      rpcUrl: RPC_URL,
+      targetAddress: WALLET_ADDRESS,
+      tokens: [
+        { amountRaw: 5n, token: TOKEN_ADDRESS, whale: WHALE_ADDRESS },
+        { amountRaw: 6n, token: TOKEN_ADDRESS, whale: WHALE_ADDRESS },
+      ],
+    })
+
+    expect(methods).toEqual([
+      'anvil_setBalance',
+      'anvil_setBalance',
+      'anvil_impersonateAccount',
+      'anvil_stopImpersonatingAccount',
+    ])
+    expect(writeContractMock).toHaveBeenCalledTimes(2)
   })
 })
 

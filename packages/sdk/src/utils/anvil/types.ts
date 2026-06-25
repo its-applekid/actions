@@ -7,16 +7,19 @@ import type {
   BorrowClosePositionParams,
   BorrowDepositCollateralParams,
   BorrowOpenPositionParams,
+  BorrowReceipt,
   BorrowRepayParams,
   BorrowWithdrawCollateralParams,
 } from '@/types/borrow/index.js'
 import type {
   ClosePositionParams,
   LendOpenPositionParams,
+  LendTransactionReceipt,
 } from '@/types/lend/index.js'
-import type { WalletSwapParams } from '@/types/swap/index.js'
+import type { SwapReceipt, WalletSwapParams } from '@/types/swap/index.js'
 import type { TransactionData } from '@/types/transaction.js'
 import type { AnvilFork } from '@/utils/test.js'
+import type { TransactionReturnType } from '@/wallet/core/wallets/abstract/types/index.js'
 import type { NodeProviderTypes } from '@/wallet/node/providers/hosted/types/index.js'
 
 export type ForkActionsConfig<
@@ -36,12 +39,22 @@ export interface ForkActionsScenario<
   rpcUrl: string
 }
 
-export interface ForkHarnessConfig {
+interface ForkHarnessBaseConfig {
   chain: Chain
   chainId: SupportedChainId
-  forkUrl?: string
-  port?: number
-  rpcUrl?: string
+}
+
+export type ForkHarnessConfig = ForkAttachHarnessConfig | ForkStartHarnessConfig
+
+export interface ForkAttachHarnessConfig extends ForkHarnessBaseConfig {
+  mode: 'attach'
+  rpcUrl: string
+}
+
+export interface ForkStartHarnessConfig extends ForkHarnessBaseConfig {
+  forkUrl: string
+  mode: 'start'
+  port: number
 }
 
 export interface ForkHarness {
@@ -89,6 +102,48 @@ export interface ForkScenarioRunResult<TResult> {
   after: ForkBalanceSnapshot
   before: ForkBalanceSnapshot
   result: TResult
+}
+
+export interface ForkWalletSendTarget {
+  address: `0x${string}`
+  send: (
+    transaction: TransactionData,
+    chainId: SupportedChainId,
+  ) => Promise<TransactionReturnType>
+}
+
+export interface ForkSwapTarget {
+  address: `0x${string}`
+  swap?: {
+    execute: (params: WalletSwapParams) => Promise<SwapReceipt>
+  }
+}
+
+export interface ForkLendTarget {
+  address: `0x${string}`
+  lend?: {
+    closePosition: (
+      params: ClosePositionParams,
+    ) => Promise<LendTransactionReceipt>
+    openPosition: (
+      params: LendOpenPositionParams,
+    ) => Promise<LendTransactionReceipt>
+  }
+}
+
+export interface ForkBorrowTarget {
+  address: `0x${string}`
+  borrow?: {
+    closePosition: (params: BorrowClosePositionParams) => Promise<BorrowReceipt>
+    depositCollateral: (
+      params: BorrowDepositCollateralParams,
+    ) => Promise<BorrowReceipt>
+    openPosition: (params: BorrowOpenPositionParams) => Promise<BorrowReceipt>
+    repay: (params: BorrowRepayParams) => Promise<BorrowReceipt>
+    withdrawCollateral: (
+      params: BorrowWithdrawCollateralParams,
+    ) => Promise<BorrowReceipt>
+  }
 }
 
 export interface ForkWalletSendScenario extends ForkScenarioContext {

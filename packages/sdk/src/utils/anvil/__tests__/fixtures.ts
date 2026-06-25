@@ -5,7 +5,10 @@ import { vi } from 'vitest'
 import { ETH } from '@/constants/assets.js'
 import type { Asset } from '@/types/asset.js'
 import type { SwapReceipt } from '@/types/swap/index.js'
-import type { EOATransactionReceipt } from '@/wallet/core/wallets/abstract/types/index.js'
+import type {
+  EOATransactionReceipt,
+  UserOperationTransactionReceipt,
+} from '@/wallet/core/wallets/abstract/types/index.js'
 
 export const CHAIN_ID = unichain.id
 export const RPC_URL = 'http://127.0.0.1:18545'
@@ -59,6 +62,23 @@ export function createReceipt(
     transactionHash: hash,
     transactionIndex: 0,
     type: 'legacy',
+  }
+}
+
+export function createUserOperationReceipt(
+  success: boolean,
+  receiptStatus: 'success' | 'reverted',
+): UserOperationTransactionReceipt {
+  return {
+    actualGasCost: 21_000n,
+    actualGasUsed: 21_000n,
+    entryPoint: TOKEN_ADDRESS,
+    logs: [],
+    nonce: 1n,
+    receipt: createReceipt(receiptStatus, TX_HASH),
+    sender: WALLET_ADDRESS,
+    success,
+    userOpHash: TX_HASH,
   }
 }
 

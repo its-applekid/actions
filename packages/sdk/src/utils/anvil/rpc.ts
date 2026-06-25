@@ -1,4 +1,4 @@
-import { ForkE2EAnvilRpcError } from '@/utils/anvilE2E/errors.js'
+import { ForkE2EAnvilRpcError } from '@/utils/anvil/errors.js'
 
 interface JsonRpcErrorPayload {
   code: number

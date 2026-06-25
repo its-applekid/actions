@@ -1,12 +1,12 @@
 import { erc20Abi, isAddressEqual } from 'viem'
 
 import type { Asset } from '@/types/asset.js'
-import { ForkE2EConfigError } from '@/utils/anvilE2E/errors.js'
+import { ForkE2EConfigError } from '@/utils/anvil/errors.js'
 import type {
   ForkBalanceEntry,
   ForkBalanceSnapshot,
   ForkScenarioContext,
-} from '@/utils/anvilE2E/types.js'
+} from '@/utils/anvil/types.js'
 
 /**
  * Snapshot token balances for one wallet on a fork.

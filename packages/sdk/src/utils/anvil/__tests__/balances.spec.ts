@@ -5,18 +5,19 @@ import {
   CHAIN_ID,
   createPublicClientMock,
   createReceipt,
+  createUserOperationReceipt,
   TEST_TOKEN,
   TX_HASH,
   WALLET_ADDRESS,
-} from '@/utils/anvilE2E/__tests__/fixtures.js'
+} from '@/utils/anvil/__tests__/fixtures.js'
 import {
   assertSuccessfulReceipts,
   ForkE2EReceiptError,
   getSnapshotBalance,
   snapshotTokenBalances,
-} from '@/utils/anvilE2E/index.js'
+} from '@/utils/anvil/index.js'
 
-describe('anvilE2E balance and receipt helpers', () => {
+describe('anvil balance and receipt helpers', () => {
   it('snapshots native and ERC-20 balances in input order', async () => {
     const publicClient = createPublicClientMock({
       ethBalances: [3n],
@@ -40,6 +41,12 @@ describe('anvilE2E balance and receipt helpers', () => {
         createReceipt('success', TX_HASH),
         createReceipt('reverted', TX_HASH),
       ]),
+    ).toThrow(ForkE2EReceiptError)
+  })
+
+  it('throws when a user operation fails with a successful bundle receipt', () => {
+    expect(() =>
+      assertSuccessfulReceipts(createUserOperationReceipt(false, 'success')),
     ).toThrow(ForkE2EReceiptError)
   })
 })
