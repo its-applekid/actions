@@ -1,15 +1,7 @@
 /**
  * Network fork test for EOAWallet.sendBatch.
- *
- * Forks baseSepolia via anvil and submits a real batch of transactions
- * through a LocalWallet, asserting the pipelined `sendBatch`
- * (sequential broadcast + parallel receipt waits) produces correct receipts
- * in input order with strictly sequential nonces.
- *
- * Run: pnpm test:network
- * Requires: anvil (foundry) on PATH; network access. Optionally set
- * BASE_SEPOLIA_RPC; defaults to https://sepolia.base.org. Anvil pre-funds its
- * default dev accounts (10000 ETH) on forks, so no live funding is needed.
+ * Run with `pnpm test:network`; requires anvil and network access.
+ * Optionally set `BASE_SEPOLIA_RPC`; anvil pre-funds dev accounts on forks.
  */
 import {
   type Address,
