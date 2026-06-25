@@ -6,12 +6,8 @@ import type {
 } from '@/types/swap/index.js'
 
 /**
- * Compile-time guard: the keys `SwapQuote` adds on top of `PriceQuote`. The
- * `satisfies` clause forces this map to list exactly those fields, so adding
- * any execution-only field to `SwapQuote` is a compile error here until the
- * field is also dropped from {@link toPriceQuote} — preventing a new field
- * from silently leaking through the price-only surface. Exists for its type
- * check only; the runtime strip happens in `toPriceQuote`.
+ * Compile-time guard for fields stripped from `SwapQuote` to `PriceQuote`.
+ * Runtime stripping still happens in `toPriceQuote`.
  */
 const _swapOnlyKeys = {
   execution: true,
@@ -20,13 +16,8 @@ const _swapOnlyKeys = {
 } satisfies Record<Exclude<keyof SwapQuote, keyof PriceQuote>, true>
 
 /**
- * Strip the execution-only fields off a full quote, leaving a price-only
- * {@link PriceQuote}. Drops `execution` and `recipient` (which, without a
- * wallet bound, would otherwise carry the Universal Router `msg.sender`
- * sentinel) plus the `approvalMode` execution hint.
- *
- * Keep the destructured keys in sync with {@link _swapOnlyKeys}; that map's
- * type fails to compile if `SwapQuote` gains a field not omitted here.
+ * Strip execution-only fields from a full quote, leaving a price-only quote.
+ * Keep destructured keys in sync with `_swapOnlyKeys`.
  */
 function toPriceQuote(quote: SwapQuote): PriceQuote {
   const {
