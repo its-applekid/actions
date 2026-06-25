@@ -1,4 +1,4 @@
-import { getAddress, parseEther, parseUnits } from 'viem'
+import { parseEther } from 'viem'
 import { optimism } from 'viem/chains'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -14,16 +14,12 @@ import {
   startOrAttachAnvilFork,
 } from '@/utils/anvil/index.js'
 import type { ForkHarness, ForkHarnessConfig } from '@/utils/anvil/types.js'
-import { getAssetAddress } from '@/utils/assets.js'
 import { ANVIL_ACCOUNTS } from '@/utils/test.js'
 
 const CHAIN_ID = optimism.id satisfies SupportedChainId
 const FORK_PORT = 18549
-const USDC_FUNDING_AMOUNT_RAW = parseUnits('100', USDC.metadata.decimals)
 const ETH_FUNDING_AMOUNT_RAW = parseEther('1')
-const EXACT_IN_AMOUNT = 10
-const OP_USDC_ADDRESS = getAssetAddress(USDC, CHAIN_ID)
-const OP_USDC_HOLDER = getAddress('0x9E3ED65340A913B96bA7B86D5D5876dDe623946e')
+const EXACT_IN_AMOUNT = 0.01
 
 const uniswapConfig: UniswapSwapProviderConfig = {
   marketAllowlist: [
@@ -37,8 +33,8 @@ const uniswapConfig: UniswapSwapProviderConfig = {
 }
 
 const swapParams = {
-  assetIn: USDC,
-  assetOut: ETH,
+  assetIn: ETH,
+  assetOut: USDC,
   amountIn: EXACT_IN_AMOUNT,
   chainId: CHAIN_ID,
   provider: UNISWAP,
@@ -55,7 +51,7 @@ describe('Uniswap standard swap e2e', () => {
     fork?.stop()
   })
 
-  it('quotes and executes an exact-in USDC to ETH swap', async () => {
+  it('quotes and executes an exact-in ETH to USDC swap', async () => {
     const { wallet } = await setupFundedUniswapWallet()
     const quote = await wallet.swap?.getQuote(swapParams)
     const quotedAmountOutRaw = quote?.amountOutRaw
@@ -70,11 +66,11 @@ describe('Uniswap standard swap e2e', () => {
     })
 
     expect(result.result.amountIn).toBe(EXACT_IN_AMOUNT)
-    expect(result.result.assetIn).toBe(USDC)
-    expect(result.result.assetOut).toBe(ETH)
+    expect(result.result.assetIn).toBe(ETH)
+    expect(result.result.assetOut).toBe(USDC)
     expect(result.result.amountOutRaw).toBe(quotedAmountOutRaw)
     expectInputBalanceDecreased(result)
-    expectOutputBalanceChanged(result)
+    expectOutputBalanceIncreased(result)
   })
 })
 
@@ -102,27 +98,20 @@ async function fundUniswapWallet(targetAddress: `0x${string}`): Promise<void> {
     publicClient: fork.publicClient,
     rpcUrl: fork.rpcUrl,
     targetAddress,
-    tokens: [
-      {
-        amountRaw: USDC_FUNDING_AMOUNT_RAW,
-        token: OP_USDC_ADDRESS,
-        whale: OP_USDC_HOLDER,
-      },
-    ],
   })
 }
 
 type SwapRunResult = Awaited<ReturnType<typeof runForkSwapProviderE2E>>
 
 function expectInputBalanceDecreased(result: SwapRunResult): void {
-  expect(getSnapshotBalance(result.after, USDC)).toBeLessThan(
-    getSnapshotBalance(result.before, USDC),
+  expect(getSnapshotBalance(result.after, ETH)).toBeLessThan(
+    getSnapshotBalance(result.before, ETH),
   )
 }
 
-function expectOutputBalanceChanged(result: SwapRunResult): void {
-  expect(getSnapshotBalance(result.after, ETH)).not.toBe(
-    getSnapshotBalance(result.before, ETH),
+function expectOutputBalanceIncreased(result: SwapRunResult): void {
+  expect(getSnapshotBalance(result.after, USDC)).toBeGreaterThan(
+    getSnapshotBalance(result.before, USDC),
   )
 }
 
