@@ -290,7 +290,7 @@ describe('calculatePriceImpact', () => {
   })
 })
 
-// #318: pin fixed-point mid-price math against Uniswap SDK price utilities.
+// Pin fixed-point mid-price math against Uniswap SDK price utilities.
 describe('calculatePriceImpact vs Uniswap SDK price reference (#318)', () => {
   // Equal decimals make the SDK quote directly comparable to our integer math.
   const token0 = new Token(10, '0x1111111111111111111111111111111111111111', 18)
@@ -717,7 +717,7 @@ describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
     expect(v4SwapInputOf(ours)).toBe(planner.finalize())
   })
 
-  // #444: V4 TAKE_ALL has no recipient, so the caller recipient must not appear.
+  // V4 TAKE_ALL has no recipient, so the caller recipient must not appear.
   it('drops the caller recipient (output is not routed to recipient != msg.sender)', () => {
     const recipient = '0x00000000000000000000000000000000DeaDBeef' as Address
     const calldata = encodeUniversalRouterSwap({
