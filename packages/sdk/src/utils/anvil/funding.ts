@@ -52,7 +52,7 @@ async function fundForkWhaleTokens(
   await requestAnvilRpc(config.rpcUrl, 'anvil_impersonateAccount', [whale])
   try {
     // Shared-whale transfers must keep one impersonation session alive.
-    for (const token of tokens) await transferForkToken(config, token)
+    await Promise.all(tokens.map((token) => transferForkToken(config, token)))
   } finally {
     await requestAnvilRpc(config.rpcUrl, 'anvil_stopImpersonatingAccount', [
       whale,
