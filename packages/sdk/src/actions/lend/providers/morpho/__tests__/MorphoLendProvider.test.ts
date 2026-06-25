@@ -1,4 +1,5 @@
 import { fetchAccrualVault } from '@morpho-org/blue-sdk-viem'
+import { type Address, decodeFunctionData, erc4626Abi } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -12,15 +13,15 @@ import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { LendProviderConfig } from '@/types/actions.js'
 
-// Mock the Morpho SDK modules
-vi.mock('@morpho-org/blue-sdk-viem', () => ({
-  fetchMarket: vi.fn(),
-  fetchAccrualVault: vi.fn(),
-  MetaMorphoAction: {
-    deposit: vi.fn(() => '0x1234567890abcdef'),
-    withdraw: vi.fn(() => '0xabcdef1234567890'),
-  },
-}))
+// Mock only network reads; keep MetaMorphoAction real for decode-back coverage.
+vi.mock('@morpho-org/blue-sdk-viem', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    fetchMarket: vi.fn(),
+    fetchAccrualVault: vi.fn(),
+  }
+})
 
 vi.mock('@morpho-org/morpho-ts', () => ({
   Time: {
@@ -59,7 +60,7 @@ describe('MorphoLendProvider', () => {
     beforeEach(() => {
       const mockVault = createMockMorphoVault()
 
-      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault as any)
+      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault)
 
       vi.stubGlobal(
         'fetch',
@@ -158,7 +159,7 @@ describe('MorphoLendProvider', () => {
     beforeEach(() => {
       const mockVault = createMockMorphoVault()
 
-      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault as any)
+      vi.mocked(fetchAccrualVault).mockResolvedValue(mockVault)
 
       // Mock the fetch API for rewards
       vi.stubGlobal(
@@ -306,6 +307,77 @@ describe('MorphoLendProvider', () => {
 
       expect(position.balanceFormatted).toBe('1')
       expect(position.sharesFormatted).toBe('1')
+    })
+  })
+
+  // Decode real MetaMorphoAction bytes with erc4626Abi so receiver/owner drift fails closed.
+  describe('signing-path calldata decode', () => {
+    const vaultAddress = MockGauntletUSDCMarket.address
+    const wallet = MockReceiverAddress.toLowerCase()
+    const marketId = {
+      address: MockGauntletUSDCMarket.address,
+      chainId: MockGauntletUSDCMarket.chainId,
+    }
+
+    beforeEach(() => {
+      vi.mocked(fetchAccrualVault).mockResolvedValue(createMockMorphoVault())
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(() =>
+          Response.json({
+            data: {
+              vaultByAddress: { state: { rewards: [], allocation: [] } },
+            },
+          }),
+        ),
+      )
+    })
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('deposit: decodes assets === amount and receiver === wallet, to === vault', async () => {
+      const tx = await provider.openPosition({
+        amount: 1000,
+        asset: MockGauntletUSDCMarket.asset,
+        marketId,
+        walletAddress: MockReceiverAddress,
+      })
+
+      expect(tx.transactionData.position.to).toBe(vaultAddress)
+      const deposit = decodeFunctionData({
+        abi: erc4626Abi,
+        data: tx.transactionData.position.data,
+      })
+      expect(deposit.functionName).toBe('deposit')
+      const [assets, receiver] = deposit.args as readonly [bigint, Address]
+      expect(assets).toBe(1000_000000n)
+      expect(receiver.toLowerCase()).toBe(wallet)
+    })
+
+    it('withdraw: decodes assets === amount, receiver === owner === wallet, to === vault', async () => {
+      const tx = await provider.closePosition({
+        amount: 500,
+        asset: MockGauntletUSDCMarket.asset,
+        marketId,
+        walletAddress: MockReceiverAddress,
+      })
+
+      expect(tx.transactionData.position.to).toBe(vaultAddress)
+      const withdraw = decodeFunctionData({
+        abi: erc4626Abi,
+        data: tx.transactionData.position.data,
+      })
+      expect(withdraw.functionName).toBe('withdraw')
+      const [assets, receiver, owner] = withdraw.args as readonly [
+        bigint,
+        Address,
+        Address,
+      ]
+      expect(assets).toBe(500_000000n)
+      expect(receiver.toLowerCase()).toBe(wallet)
+      expect(owner.toLowerCase()).toBe(wallet)
     })
   })
 

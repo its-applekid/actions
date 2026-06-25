@@ -1,8 +1,9 @@
-import type { Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { decodeAbiParameters } from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import { MockUSDCAsset, MockWETHAsset } from '@/__mocks__/MockAssets.js'
+import { UNIVERSAL_ROUTER_MSG_SENDER } from '@/actions/swap/core/markets.js'
 import { UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/velodrome/abis.js'
 import {
   encodeCLSwap,
@@ -66,6 +67,35 @@ describe('encodeCLSwap', () => {
       (p) => p.name === 'payerIsUser',
     )
     expect(decoded[payerIsUserIdx]).toBe(true)
+  })
+
+  // Pin that CL universal-router swaps use the msg.sender sentinel, not recipient.
+  it('encodes recipient = msg.sender sentinel and drops the caller recipient', () => {
+    const data = encodeCLSwap({
+      assetIn: MockUSDCAsset,
+      assetOut: MockWETHAsset,
+      amountInRaw: 1000000n,
+      amountOutMin: 400000000000000000n,
+      tickSpacing: 100,
+      recipient: RECIPIENT,
+      deadline: DEADLINE,
+      chainId: BASE_CHAIN_ID,
+    })
+
+    const { args } = decode<[Hex, Hex[], bigint]>(UNIVERSAL_ROUTER_ABI, data)
+    const [, inputs] = args
+    const decoded = decodeAbiParameters(
+      V3_SWAP_EXACT_IN_INPUT_PARAMS,
+      inputs[0],
+    )
+    const recipientIdx = V3_SWAP_EXACT_IN_INPUT_PARAMS.findIndex(
+      (p) => p.name === 'recipient',
+    )
+    const encodedRecipient = decoded[recipientIdx] as Address
+    expect(encodedRecipient.toLowerCase()).toBe(
+      UNIVERSAL_ROUTER_MSG_SENDER.toLowerCase(),
+    )
+    expect(encodedRecipient.toLowerCase()).not.toBe(RECIPIENT.toLowerCase())
   })
 
   it('produces different calldata than V2 universal router swap', () => {

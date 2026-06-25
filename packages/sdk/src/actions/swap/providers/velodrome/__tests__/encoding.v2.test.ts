@@ -7,6 +7,7 @@ import {
   MockUSDCAsset,
   MockWETHAsset,
 } from '@/__mocks__/MockAssets.js'
+import { UNIVERSAL_ROUTER_MSG_SENDER } from '@/actions/swap/core/markets.js'
 import {
   LEAF_ROUTER_ABI,
   UNIVERSAL_ROUTER_ABI,
@@ -227,6 +228,38 @@ describe('encodeSwap', () => {
         (p) => p.name === 'payerIsUser',
       )
       expect(decoded[payerIsUserIdx]).toBe(true)
+    })
+
+    // Pin that universal-router swaps use the msg.sender sentinel, not recipient.
+    it('encodes recipient = msg.sender sentinel and drops the caller recipient', () => {
+      const data = encodeSwap({
+        assetIn: MockUSDCAsset,
+        assetOut: MockWETHAsset,
+        amountInRaw: 1000000n,
+        amountOutMin: 400000000000000000n,
+        routerType: 'universal',
+        stable: false,
+        factoryAddress: FACTORY,
+        recipient: RECIPIENT,
+        deadline: DEADLINE,
+        chainId: BASE_CHAIN_ID,
+      })
+
+      const { args } = decode<[Hex, Hex[], bigint]>(UNIVERSAL_ROUTER_ABI, data)
+      const [, inputs] = args
+      const decoded = decodeAbiParameters(
+        V2_SWAP_EXACT_IN_INPUT_PARAMS,
+        inputs[0],
+      )
+      const recipientIdx = V2_SWAP_EXACT_IN_INPUT_PARAMS.findIndex(
+        (p) => p.name === 'recipient',
+      )
+      const encodedRecipient = decoded[recipientIdx] as Address
+      expect(encodedRecipient.toLowerCase()).toBe(
+        UNIVERSAL_ROUTER_MSG_SENDER.toLowerCase(),
+      )
+      // Output must not silently route to the caller's requested recipient.
+      expect(encodedRecipient.toLowerCase()).not.toBe(RECIPIENT.toLowerCase())
     })
   })
 

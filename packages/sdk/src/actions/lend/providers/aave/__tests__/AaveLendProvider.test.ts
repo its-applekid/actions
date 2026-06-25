@@ -1,3 +1,4 @@
+import { type Address, decodeFunctionData, erc20Abi } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MockReceiverAddress } from '@/actions/lend/__mocks__/MockMarkets.js'
@@ -7,6 +8,11 @@ import {
 } from '@/actions/lend/providers/aave/__mocks__/mockReserve.js'
 import { AaveLendProvider } from '@/actions/lend/providers/aave/AaveLendProvider.js'
 import * as aaveSdk from '@/actions/lend/providers/aave/sdk.js'
+import { POOL_ABI, WETH_GATEWAY_ABI } from '@/actions/shared/aave/abis/pool.js'
+import {
+  getPoolAddress,
+  getWETHGatewayAddress,
+} from '@/actions/shared/aave/addresses.js'
 import { MockChainManager } from '@/services/__mocks__/MockChainManager.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { LendProviderConfig } from '@/types/actions.js'
@@ -60,6 +66,9 @@ const MockAaveETHMarket: LendMarketConfig = {
   asset: MockAaveETHAsset,
   lendProvider: 'aave',
 }
+
+const MockAaveWETHATokenAddress =
+  '0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7' as Address
 
 describe('AaveLendProvider', () => {
   let provider: AaveLendProvider
@@ -388,6 +397,152 @@ describe('AaveLendProvider', () => {
       // Verify the market uses native asset
       expect(marketConfig.asset.type).toBe('native')
       // Developer doesn't need to create a separate WETH asset
+    })
+  })
+
+  // Decode signed bytes with local Aave ABIs so recipient and spender drift fails closed.
+  describe('signing-path calldata decode', () => {
+    const CHAIN_ID = 8453
+    const wallet = MockReceiverAddress.toLowerCase()
+    const poolAddress = getPoolAddress(CHAIN_ID)!.toLowerCase()
+    const gateway = getWETHGatewayAddress(CHAIN_ID)!.toLowerCase()
+
+    beforeEach(() => {
+      vi.mocked(aaveSdk.getReserve).mockResolvedValue(createMockAaveReserve())
+    })
+
+    it('supply: decodes asset/amount/onBehalfOf/referralCode and the approval spender', async () => {
+      const tx = await provider.openPosition({
+        amount: 1000,
+        asset: MockAaveUSDCAsset,
+        marketId: { address: MockAaveUSDCMarket.address, chainId: CHAIN_ID },
+        walletAddress: MockReceiverAddress,
+      })
+
+      expect(tx.transactionData.position.to.toLowerCase()).toBe(poolAddress)
+      const supply = decodeFunctionData({
+        abi: POOL_ABI,
+        data: tx.transactionData.position.data,
+      })
+      expect(supply.functionName).toBe('supply')
+      const [asset, amount, onBehalfOf, referralCode] =
+        supply.args as readonly [Address, bigint, Address, number]
+      expect(asset.toLowerCase()).toBe(
+        MockAaveUSDCAsset.address[CHAIN_ID]!.toLowerCase(),
+      )
+      expect(amount).toBe(1000_000000n)
+      expect(onBehalfOf.toLowerCase()).toBe(wallet)
+      expect(referralCode).toBe(0)
+
+      // Approval must grant the Pool (not an attacker) exactly the supply amount.
+      const approval = tx.transactionData.approval!
+      expect(approval.to.toLowerCase()).toBe(
+        MockAaveUSDCAsset.address[CHAIN_ID]!.toLowerCase(),
+      )
+      const approve = decodeFunctionData({ abi: erc20Abi, data: approval.data })
+      expect(approve.functionName).toBe('approve')
+      const [spender, allowance] = approve.args as readonly [Address, bigint]
+      expect(spender.toLowerCase()).toBe(poolAddress)
+      expect(allowance).toBe(1000_000000n)
+    })
+
+    it('withdraw: decodes asset/amount and routes `to` the wallet', async () => {
+      const tx = await provider.closePosition({
+        amount: 500,
+        asset: MockAaveUSDCAsset,
+        marketId: { address: MockAaveUSDCMarket.address, chainId: CHAIN_ID },
+        walletAddress: MockReceiverAddress,
+      })
+
+      expect(tx.transactionData.position.to.toLowerCase()).toBe(poolAddress)
+      const withdraw = decodeFunctionData({
+        abi: POOL_ABI,
+        data: tx.transactionData.position.data,
+      })
+      expect(withdraw.functionName).toBe('withdraw')
+      const [asset, amount, to] = withdraw.args as readonly [
+        Address,
+        bigint,
+        Address,
+      ]
+      expect(asset.toLowerCase()).toBe(
+        MockAaveUSDCAsset.address[CHAIN_ID]!.toLowerCase(),
+      )
+      expect(amount).toBe(500_000000n)
+      expect(to.toLowerCase()).toBe(wallet)
+    })
+
+    it('depositETH: decodes pool/onBehalfOf/referralCode and sends ETH as msg.value', async () => {
+      vi.mocked(aaveSdk.getReserve).mockResolvedValue(createMockWETHReserve())
+
+      const tx = await provider.openPosition({
+        amount: 1,
+        asset: MockAaveETHAsset,
+        marketId: { address: MockAaveETHMarket.address, chainId: CHAIN_ID },
+        walletAddress: MockReceiverAddress,
+      })
+
+      expect(tx.transactionData.position.to.toLowerCase()).toBe(gateway)
+      expect(tx.transactionData.position.value).toBe(10n ** 18n)
+      const deposit = decodeFunctionData({
+        abi: WETH_GATEWAY_ABI,
+        data: tx.transactionData.position.data,
+      })
+      expect(deposit.functionName).toBe('depositETH')
+      const [pool, onBehalfOf, referralCode] = deposit.args as readonly [
+        Address,
+        Address,
+        number,
+      ]
+      expect(pool.toLowerCase()).toBe(poolAddress)
+      // onBehalfOf receives the aWETH: must be the wallet, never the pool.
+      expect(onBehalfOf.toLowerCase()).toBe(wallet)
+      expect(referralCode).toBe(0)
+    })
+
+    it('withdrawETH: decodes pool/amount, routes native ETH `to` the wallet, approves the gateway', async () => {
+      vi.mocked(aaveSdk.getReserve).mockResolvedValue(createMockWETHReserve())
+      // Gateway approval must target the aToken contract, not underlying WETH.
+      vi.mocked(aaveSdk.getATokenAddress).mockResolvedValue(
+        MockAaveWETHATokenAddress,
+      )
+
+      const tx = await provider.closePosition({
+        amount: 1,
+        asset: MockAaveETHAsset,
+        marketId: { address: MockAaveETHMarket.address, chainId: CHAIN_ID },
+        walletAddress: MockReceiverAddress,
+      })
+
+      expect(tx.transactionData.position.to.toLowerCase()).toBe(gateway)
+      const withdraw = decodeFunctionData({
+        abi: WETH_GATEWAY_ABI,
+        data: tx.transactionData.position.data,
+      })
+      expect(withdraw.functionName).toBe('withdrawETH')
+      const [pool, amount, to] = withdraw.args as readonly [
+        Address,
+        bigint,
+        Address,
+      ]
+      expect(pool.toLowerCase()).toBe(poolAddress)
+      expect(amount).toBe(10n ** 18n)
+      // `to` receives the unwrapped native ETH: the highest-blast-radius field.
+      expect(to.toLowerCase()).toBe(wallet)
+
+      // aWETH approval must be granted to the gateway, not the pool/an attacker.
+      const approval = tx.transactionData.approval!
+      expect(approval.to.toLowerCase()).toBe(
+        MockAaveWETHATokenAddress.toLowerCase(),
+      )
+      const approve = decodeFunctionData({
+        abi: erc20Abi,
+        data: approval.data,
+      })
+      expect(approve.functionName).toBe('approve')
+      const [spender, allowance] = approve.args as readonly [Address, bigint]
+      expect(spender.toLowerCase()).toBe(gateway)
+      expect(allowance).toBe(10n ** 18n)
     })
   })
 

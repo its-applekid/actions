@@ -1,13 +1,23 @@
+import { CurrencyAmount, Price, Token } from '@uniswap/sdk-core'
+import { CommandType } from '@uniswap/universal-router-sdk'
+import { Actions, V4Planner } from '@uniswap/v4-sdk'
+import { BigNumber } from 'ethers'
 import {
   type Address,
   decodeAbiParameters,
   decodeFunctionData,
+  type Hex,
   type PublicClient,
   zeroAddress,
 } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
-import { UNIVERSAL_ROUTER_ABI } from '@/actions/swap/providers/uniswap/abis.js'
+import {
+  CURRENCY_AMOUNT_PARAMS,
+  EXACT_INPUT_SINGLE_PARAMS,
+  EXACT_OUTPUT_SINGLE_PARAMS,
+  UNIVERSAL_ROUTER_ABI,
+} from '@/actions/swap/providers/uniswap/abis.js'
 import {
   calculatePriceImpact,
   encodeUniversalRouterSwap,
@@ -138,12 +148,18 @@ describe('getQuote', () => {
     })
 
     const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
-    // currency0 should be the lower address
-    expect(
-      args.poolKey.currency0.toLowerCase() <
-        args.poolKey.currency1.toLowerCase(),
-    ).toBe(true)
+    expect(call).toEqual(
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            poolKey: expect.objectContaining({
+              currency0: USDC.address[CHAIN_ID],
+              currency1: WETH.address[CHAIN_ID],
+            }),
+          }),
+        ],
+      }),
+    )
   })
 
   it('uses address(0) for native ETH in pool key', async () => {
@@ -161,9 +177,17 @@ describe('getQuote', () => {
     })
 
     const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
-    // Native ETH should be address(0), sorted as currency0 (lowest possible address)
-    expect(args.poolKey.currency0).toBe(zeroAddress)
+    expect(call).toEqual(
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            poolKey: expect.objectContaining({
+              currency0: zeroAddress,
+            }),
+          }),
+        ],
+      }),
+    )
   })
 
   it('uses address(0) for native ETH as output', async () => {
@@ -181,9 +205,17 @@ describe('getQuote', () => {
     })
 
     const call = vi.mocked(publicClient.simulateContract).mock.calls[0][0]
-    const args = (call as any).args[0]
-    // Native ETH should be address(0) regardless of swap direction
-    expect(args.poolKey.currency0).toBe(zeroAddress)
+    expect(call).toEqual(
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            poolKey: expect.objectContaining({
+              currency0: zeroAddress,
+            }),
+          }),
+        ],
+      }),
+    )
   })
 })
 
@@ -255,6 +287,50 @@ describe('calculatePriceImpact', () => {
 
     expect(impact).toBeGreaterThan(0.05)
     expect(impact).toBeLessThan(0.15)
+  })
+})
+
+// Pin fixed-point mid-price math against Uniswap SDK price utilities.
+describe('calculatePriceImpact vs Uniswap SDK price reference (#318)', () => {
+  // Equal decimals make the SDK quote directly comparable to our integer math.
+  const token0 = new Token(10, '0x1111111111111111111111111111111111111111', 18)
+  const token1 = new Token(10, '0x2222222222222222222222222222222222222222', 18)
+  const SQRT_PRICE = 5602302599546145575577086272208896n // ~70711² ≈ 5e9 ratio
+  const Q192 = 1n << 192n
+  const amountIn = 10n ** 9n
+
+  // Reference mid-price output from the Uniswap SDK: amountIn * sqrtPrice² / 2¹⁹².
+  const midPrice = new Price(
+    token0,
+    token1,
+    Q192.toString(),
+    (SQRT_PRICE * SQRT_PRICE).toString(),
+  )
+  const refQuotedOut = BigInt(
+    midPrice
+      .quote(CurrencyAmount.fromRawAmount(token0, amountIn.toString()))
+      .quotient.toString(),
+  )
+
+  it('reads ~0 impact at the SDK-derived mid-price output', () => {
+    const impact = calculatePriceImpact({
+      sqrtPriceX96: SQRT_PRICE,
+      amountIn,
+      amountOut: refQuotedOut,
+      zeroForOne: true,
+    })
+    expect(Math.abs(impact)).toBeLessThan(1e-4)
+  })
+
+  it('reads ~20% impact when execution is 20% below the SDK mid-price', () => {
+    const impact = calculatePriceImpact({
+      sqrtPriceX96: SQRT_PRICE,
+      amountIn,
+      amountOut: (refQuotedOut * 80n) / 100n,
+      zeroForOne: true,
+    })
+    expect(impact).toBeGreaterThan(0.199)
+    expect(impact).toBeLessThan(0.201)
   })
 })
 
@@ -427,5 +503,239 @@ describe('encodeUniversalRouterSwap', () => {
 
     // Different slippage should produce different calldata
     expect(noSlippage).not.toBe(withSlippage)
+  })
+})
+
+// Anchor the hand-rolled V4 encoder against Uniswap's reference encoders.
+describe('encodeUniversalRouterSwap vs Uniswap SDK differential', () => {
+  const diffQuote = {
+    price: '0',
+    priceInverse: '0',
+    amountIn: 100,
+    amountOut: 0.5,
+    amountInRaw: 100000000n,
+    amountOutRaw: 500000000000000000n,
+    priceImpact: 0,
+    route: { path: [USDC, WETH], pools: [] },
+  }
+  const SLIPPAGE = 0.005
+  const DEADLINE = 1700000000
+
+  // V4Planner uses ethers v5 ABI encoding, so convert bigint inputs explicitly.
+  const bn = (v: bigint) => BigNumber.from(v.toString())
+
+  /** Pull the decoded `execute(commands, inputs, deadline)` out of our calldata. */
+  const decodeExecute = (calldata: Hex) => {
+    const { args } = decodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      data: calldata,
+    })
+    return args as readonly [Hex, Hex[], bigint]
+  }
+
+  const v4SwapInputOf = (calldata: Hex): Hex => decodeExecute(calldata)[1][0]!
+
+  it('exact-in: byte-equal to V4Planner and pins min-out + take currency', () => {
+    const minOut =
+      (diffQuote.amountOutRaw * BigInt(Math.round((1 - SLIPPAGE) * 10000))) /
+      10000n
+    const ours = encodeUniversalRouterSwap({
+      amountInRaw: diffQuote.amountInRaw,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient: zeroAddress,
+      chainId: CHAIN_ID,
+      quote: diffQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    // Reference: encode the same intent with the canonical V4Planner.
+    const poolKey = {
+      currency0: USDC.address[CHAIN_ID]!,
+      currency1: WETH.address[CHAIN_ID]!,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+      hooks: zeroAddress,
+    }
+    const planner = new V4Planner()
+    planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
+      {
+        poolKey,
+        zeroForOne: true,
+        amountIn: bn(diffQuote.amountInRaw),
+        amountOutMinimum: bn(minOut),
+        hookData: '0x',
+      },
+    ])
+    planner.addAction(Actions.SETTLE_ALL, [
+      poolKey.currency0,
+      bn(diffQuote.amountInRaw),
+    ])
+    planner.addAction(Actions.TAKE_ALL, [poolKey.currency1, bn(minOut)])
+
+    const [commands, , deadline] = decodeExecute(ours)
+    // Command byte ties to the SDK's own V4_SWAP constant (16 maps to 0x10).
+    expect(commands).toBe(
+      `0x${CommandType.V4_SWAP.toString(16).padStart(2, '0')}`,
+    )
+    expect(deadline).toBe(BigInt(DEADLINE))
+    expect(v4SwapInputOf(ours)).toBe(planner.finalize())
+
+    // Independent decode of the security-critical fields out of OUR bytes.
+    const [actions, params] = decodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      v4SwapInputOf(ours),
+    )
+    // 0x060c0f = SWAP_EXACT_IN_SINGLE(0x06) + SETTLE_ALL(0x0c) + TAKE_ALL(0x0f).
+    expect(actions).toBe('0x060c0f')
+    const [swap] = decodeAbiParameters(EXACT_INPUT_SINGLE_PARAMS, params[0]!)
+    expect(swap.amountIn).toBe(diffQuote.amountInRaw)
+    expect(swap.amountOutMinimum).toBe(minOut)
+    const [takeCurrency, takeMin] = decodeAbiParameters(
+      CURRENCY_AMOUNT_PARAMS,
+      params[2]!,
+    )
+    expect((takeCurrency as Address).toLowerCase()).toBe(
+      WETH.address[CHAIN_ID]!.toLowerCase(),
+    )
+    expect(takeMin).toBe(minOut)
+  })
+
+  it('exact-out: byte-equal to V4Planner and pins max-in', () => {
+    const maxIn =
+      diffQuote.amountInRaw +
+      (diffQuote.amountInRaw * BigInt(Math.round(SLIPPAGE * 10000))) / 10000n
+    const ours = encodeUniversalRouterSwap({
+      amountOutRaw: diffQuote.amountOutRaw,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient: zeroAddress,
+      chainId: CHAIN_ID,
+      quote: diffQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    const poolKey = {
+      currency0: USDC.address[CHAIN_ID]!,
+      currency1: WETH.address[CHAIN_ID]!,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+      hooks: zeroAddress,
+    }
+    const planner = new V4Planner()
+    planner.addAction(Actions.SWAP_EXACT_OUT_SINGLE, [
+      {
+        poolKey,
+        zeroForOne: true,
+        amountOut: bn(diffQuote.amountOutRaw),
+        amountInMaximum: bn(maxIn),
+        hookData: '0x',
+      },
+    ])
+    planner.addAction(Actions.SETTLE_ALL, [poolKey.currency0, bn(maxIn)])
+    planner.addAction(Actions.TAKE_ALL, [
+      poolKey.currency1,
+      bn(diffQuote.amountOutRaw),
+    ])
+
+    const [commands, , deadline] = decodeExecute(ours)
+    expect(commands).toBe(
+      `0x${CommandType.V4_SWAP.toString(16).padStart(2, '0')}`,
+    )
+    expect(deadline).toBe(BigInt(DEADLINE))
+    expect(v4SwapInputOf(ours)).toBe(planner.finalize())
+
+    const [, params] = decodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes[]' }],
+      v4SwapInputOf(ours),
+    )
+    const [swap] = decodeAbiParameters(EXACT_OUTPUT_SINGLE_PARAMS, params[0]!)
+    expect(swap.amountOut).toBe(diffQuote.amountOutRaw)
+    expect(swap.amountInMaximum).toBe(maxIn)
+  })
+
+  it('native-in: byte-equal to V4Planner (ETH settled as currency0)', () => {
+    const nativeQuote = {
+      ...diffQuote,
+      amountInRaw: 10n ** 18n,
+      amountOutRaw: 2000000000n,
+    }
+    const minOut =
+      (nativeQuote.amountOutRaw * BigInt(Math.round((1 - SLIPPAGE) * 10000))) /
+      10000n
+    const ours = encodeUniversalRouterSwap({
+      amountInRaw: nativeQuote.amountInRaw,
+      assetIn: ETH,
+      assetOut: USDC,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient: zeroAddress,
+      chainId: CHAIN_ID,
+      quote: nativeQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    // ETH (address(0)) sorts as currency0; USDC currency1; zeroForOne true.
+    const poolKey = {
+      currency0: zeroAddress,
+      currency1: USDC.address[CHAIN_ID]!,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+      hooks: zeroAddress,
+    }
+    const planner = new V4Planner()
+    planner.addAction(Actions.SWAP_EXACT_IN_SINGLE, [
+      {
+        poolKey,
+        zeroForOne: true,
+        amountIn: bn(nativeQuote.amountInRaw),
+        amountOutMinimum: bn(minOut),
+        hookData: '0x',
+      },
+    ])
+    planner.addAction(Actions.SETTLE_ALL, [
+      zeroAddress,
+      bn(nativeQuote.amountInRaw),
+    ])
+    planner.addAction(Actions.TAKE_ALL, [poolKey.currency1, bn(minOut)])
+
+    const [commands, , deadline] = decodeExecute(ours)
+    expect(commands).toBe(
+      `0x${CommandType.V4_SWAP.toString(16).padStart(2, '0')}`,
+    )
+    expect(deadline).toBe(BigInt(DEADLINE))
+    expect(v4SwapInputOf(ours)).toBe(planner.finalize())
+  })
+
+  // V4 TAKE_ALL has no recipient, so the caller recipient must not appear.
+  it('drops the caller recipient (output is not routed to recipient != msg.sender)', () => {
+    const recipient = '0x00000000000000000000000000000000DeaDBeef' as Address
+    const calldata = encodeUniversalRouterSwap({
+      amountInRaw: diffQuote.amountInRaw,
+      assetIn: USDC,
+      assetOut: WETH,
+      slippage: SLIPPAGE,
+      deadline: DEADLINE,
+      recipient,
+      chainId: CHAIN_ID,
+      quote: diffQuote,
+      universalRouterAddress: zeroAddress,
+      fee: FEE,
+      tickSpacing: TICK_SPACING,
+    })
+
+    expect(calldata.toLowerCase()).not.toContain(
+      recipient.slice(2).toLowerCase(),
+    )
   })
 })
