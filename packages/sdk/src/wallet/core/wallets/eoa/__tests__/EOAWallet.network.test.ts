@@ -6,15 +6,18 @@ import { ETH } from '@/constants/assets.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import type { TransactionData } from '@/types/transaction.js'
 import {
-  assertSuccessfulReceipts,
   fundForkWallet,
   getSnapshotBalance,
+  runForkWalletBatchSendE2E,
   runForkWalletSendE2E,
   setupForkActions,
-  snapshotTokenBalances,
   startOrAttachAnvilFork,
 } from '@/utils/anvil/index.js'
-import type { ForkHarness, ForkHarnessConfig } from '@/utils/anvil/types.js'
+import type {
+  ForkBalanceSnapshot,
+  ForkHarness,
+  ForkHarnessConfig,
+} from '@/utils/anvil/types.js'
 
 const CHAIN_ID = baseSepolia.id satisfies SupportedChainId
 const SEND_RECIPIENT = getAddress('0x0000000000000000000000000000000000001001')
@@ -78,41 +81,43 @@ describe('EOAWallet standard fork e2e', () => {
 
   it('sends ETH through the public EOA wallet API', async () => {
     const { account, wallet } = await setupFundedEoaWallet()
-    const before = await snapshotNativeBalance(expectedSingleSendDelta.address)
 
     const result = await runForkWalletSendE2E(wallet, {
       balanceAssets: [ETH],
       chainId: CHAIN_ID,
       publicClient: fork.publicClient,
+      snapshotAddresses: [wallet.address, expectedSingleSendDelta.address],
       transaction: singleSendTransaction,
     })
-    const after = await snapshotNativeBalance(expectedSingleSendDelta.address)
 
     expect(wallet.address).toBe(account.address)
     expect(result.result).toBeDefined()
-    expectBalanceDelta(before, after, expectedSingleSendDelta.amountRaw)
+    expectNativeBalanceDelta(
+      result.beforeSnapshots[1],
+      result.afterSnapshots[1],
+      expectedSingleSendDelta.amountRaw,
+    )
   })
 
   it('sends an ETH batch through the public EOA wallet API', async () => {
     const { wallet } = await setupFundedEoaWallet()
-    const before = await Promise.all(
-      expectedBatchSendDeltas.map((delta) =>
-        snapshotNativeBalance(delta.address),
-      ),
-    )
 
-    const receipts = assertSuccessfulReceipts(
-      await wallet.sendBatch(batchSendTransactions, CHAIN_ID),
-    )
-    const after = await Promise.all(
-      expectedBatchSendDeltas.map((delta) =>
-        snapshotNativeBalance(delta.address),
-      ),
-    )
+    const result = await runForkWalletBatchSendE2E(wallet, {
+      balanceAssets: [ETH],
+      chainId: CHAIN_ID,
+      publicClient: fork.publicClient,
+      snapshotAddresses: [wallet.address, BATCH_RECIPIENT_A, BATCH_RECIPIENT_B],
+      transactions: batchSendTransactions,
+    })
 
-    expect(receipts).toHaveLength(batchSendTransactions.length)
+    expect(result.result).toHaveLength(batchSendTransactions.length)
     for (const [index, delta] of expectedBatchSendDeltas.entries()) {
-      expectBalanceDelta(before[index], after[index], delta.amountRaw)
+      const snapshotIndex = index + 1
+      expectNativeBalanceDelta(
+        result.beforeSnapshots[snapshotIndex],
+        result.afterSnapshots[snapshotIndex],
+        delta.amountRaw,
+      )
     }
   })
 })
@@ -161,17 +166,9 @@ async function setupFundedEoaWallet() {
   return setup
 }
 
-function snapshotNativeBalance(address: `0x${string}`) {
-  return snapshotTokenBalances(
-    { chainId: CHAIN_ID, publicClient: fork.publicClient },
-    address,
-    [ETH],
-  )
-}
-
-function expectBalanceDelta(
-  before: Awaited<ReturnType<typeof snapshotNativeBalance>>,
-  after: Awaited<ReturnType<typeof snapshotNativeBalance>>,
+function expectNativeBalanceDelta(
+  before: ForkBalanceSnapshot,
+  after: ForkBalanceSnapshot,
   expectedDeltaRaw: bigint,
 ): void {
   expect(getSnapshotBalance(after, ETH) - getSnapshotBalance(before, ETH)).toBe(
