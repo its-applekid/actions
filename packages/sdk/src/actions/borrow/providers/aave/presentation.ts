@@ -236,6 +236,7 @@ export interface AssembleAaveQuoteArgs {
   recipient: Address
   quoteExpirationSeconds: number
   healthBufferPct: number
+  providerContext?: Record<string, unknown>
 }
 
 /**
@@ -260,6 +261,7 @@ export function assembleAaveBorrowQuote(
     quoteAmounts: args.quoteAmounts,
     transactions: args.transactions,
     approvalsSkipped: args.approvalsSkipped,
+    providerContext: args.providerContext,
     healthBufferPct: args.healthBufferPct,
     quoteExpirationSeconds: args.quoteExpirationSeconds,
   })

@@ -114,6 +114,15 @@ export class MockSwapProvider extends SwapProvider<SwapProviderConfig> {
     return this.buildSwapTransactions(quote)
   }
 
+  /** Router baked into `createMockQuote`; lets the base router binding pass. */
+  protected canonicalRouterAddress(_chainId: SupportedChainId): Address {
+    return '0x492e6456d9528771018deb9e87ef7750ef184104' as Address
+  }
+
+  protected assertSwapCalldataBound(_quote: SwapQuote): void {
+    // Mock calldata is a placeholder (`0x1234`); skip the per-router decode.
+  }
+
   protected async _execute(
     params: ResolvedSwapParams,
   ): Promise<SwapTransaction> {

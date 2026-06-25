@@ -1,5 +1,5 @@
 import type { Address } from 'viem'
-import { formatUnits } from 'viem'
+import { formatUnits, isAddressEqual } from 'viem'
 
 import { BaseActionProvider } from '@/actions/shared/BaseActionProvider.js'
 import { DEFAULT_QUOTE_EXPIRATION_SECONDS } from '@/actions/shared/defaults.js'
@@ -10,7 +10,9 @@ import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
   MarketNotAllowedError,
   ProviderNotConfiguredError,
+  QuoteCalldataMismatchError,
   QuoteRecipientMissingError,
+  RouterNotAllowedError,
 } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type {
@@ -427,13 +429,107 @@ export abstract class SwapProvider<
     }
   }
 
+  /**
+   * The canonical router address this provider sends swaps to on a chain,
+   * derived from static per-chain config (no RPC). Used to bind a pre-built
+   * quote's `execution.routerAddress` before signing.
+   * @description Defaults to fail-closed so existing external subclasses keep
+   * compiling on patch releases but cannot execute pre-built quotes until they
+   * implement router binding.
+   * @param chainId - Chain the pre-built quote targets.
+   * @returns Canonical router address for this provider on the chain.
+   * @throws QuoteCalldataMismatchError when the provider has not opted into
+   * pre-built quote execution.
+   */
+  protected canonicalRouterAddress(chainId: SupportedChainId): Address {
+    throw new QuoteCalldataMismatchError({
+      field: 'routerAddress',
+      received: String(chainId),
+      detail: 'provider must implement canonicalRouterAddress',
+    })
+  }
+
+  /**
+   * Decode `quote.execution.swapCalldata` and assert it routes the swap output
+   * to the executing wallet (`quote.recipient`, already bound to the wallet by
+   * the namespace). Implementations decode per router/version and throw
+   * `QuoteCalldataMismatchError` on any divergence. Routes that structurally
+   * settle to `msg.sender` (Uniswap V4, Velodrome universal/CL) assert the
+   * canonical shape / sentinel so the executing wallet is the recipient.
+   * @description Defaults to fail-closed so existing external subclasses keep
+   * compiling on patch releases but cannot execute pre-built quotes until they
+   * implement calldata binding.
+   * @param quote - Pre-built swap quote whose calldata is about to be signed.
+   * @returns Nothing when calldata is bound to the quote.
+   * @throws QuoteCalldataMismatchError when the provider has not opted into
+   * pre-built quote execution.
+   */
+  protected assertSwapCalldataBound(quote: SwapQuote): void {
+    throw new QuoteCalldataMismatchError({
+      field: 'swapCalldata',
+      detail: `${quote.provider} must implement assertSwapCalldataBound`,
+    })
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Assert `execution.routerAddress` is the router this provider derives for
+   * the quote's chain from static config (no RPC). Closes the
+   * provider/routerAddress consistency hole: approvals are built for the
+   * provider's own router, so a quote whose `routerAddress` points elsewhere
+   * would have the user approve one router and swap through another.
+   */
+  protected assertQuoteRouter(quote: SwapQuote): void {
+    const expected = this.canonicalRouterAddress(quote.chainId)
+    if (!isAddressEqual(quote.execution.routerAddress, expected)) {
+      throw new RouterNotAllowedError({
+        provider: quote.provider,
+        chainId: quote.chainId,
+        expected,
+        received: quote.execution.routerAddress,
+      })
+    }
+  }
+
+  /**
+   * Bound `execution.value`: `0` for an ERC-20 input (no native value should
+   * ride along), and exactly the quoted native input (`amountInRaw`) for a
+   * native-in swap. Blocks a quote that smuggles native value unrelated to the
+   * quoted amount.
+   */
+  protected assertQuoteValue(quote: SwapQuote): void {
+    const expected = isNativeAsset(quote.assetIn) ? quote.amountInRaw : 0n
+    if (quote.execution.value !== expected) {
+      throw new QuoteCalldataMismatchError({
+        field: 'value',
+        expected: expected.toString(),
+        received: quote.execution.value.toString(),
+        detail: isNativeAsset(quote.assetIn)
+          ? 'native-in swap value must equal the quoted amountInRaw'
+          : 'ERC-20-in swap value must be 0',
+      })
+    }
+  }
+
+  /**
+   * Reconcile a pre-built quote's signed bytes against the metadata before
+   * dispatch. `quote.provider` was used to resolve this provider, so these
+   * checks bind the calldata the user is about to sign to what the quote
+   * claims: the router is this provider's canonical router for the chain
+   * (also the spender approvals are built for), the native value matches the
+   * quoted input, and the calldata routes output to the executing wallet.
+   * Runs before `buildSwapTransactions` so a wrong-router quote never reaches
+   * approval building.
+   */
   private async executeFromQuote(quote: SwapQuote): Promise<SwapTransaction> {
     validateQuoteNotExpired(quote.expiresAt)
     validateNotZeroAddress(quote.execution.routerAddress, 'routerAddress')
+    this.assertQuoteRouter(quote)
+    this.assertQuoteValue(quote)
+    this.assertSwapCalldataBound(quote)
     return this.buildSwapTransactions(quote)
   }
 

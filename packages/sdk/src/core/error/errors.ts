@@ -330,10 +330,16 @@ export class InvalidParamsError extends ActionsError {
 /**
  * Thrown when a pre-built quote (swap, borrow, …) is dispatched against a
  * wallet whose address differs from the quote's `recipient`. Some routers
- * (Velodrome v2/leaf) and protocols (Morpho `supplyCollateral` / `borrow` /
- * `repay` / `withdrawCollateral`) encode the recipient or `onBehalf` address
- * directly into calldata, so silently swapping recipients would route assets
- * or position changes to the wrong account.
+ * (Velodrome v2/leaf) and protocols (Aave `borrow`/`supply`/`withdraw`/`repay`,
+ * Morpho `supplyCollateral`/`borrow`/`repay`/`withdrawCollateral`) bake the
+ * recipient or `onBehalf` address directly into calldata, so silently swapping
+ * recipients would route assets or position changes to the wrong account.
+ *
+ * `recipient` is a sidecar metadata field on an untrusted, caller-supplied
+ * object: passing this guard proves the quote *claims* to be for this wallet,
+ * not that the signed bytes actually move funds to it. The calldata-integrity
+ * checks (`RouterNotAllowedError`, `QuoteCalldataMismatchError`) cross the
+ * metadata-to-bytes boundary that this guard alone does not.
  */
 export class QuoteRecipientMismatchError extends ActionsError {
   override name = 'QuoteRecipientMismatchError' as const
@@ -359,6 +365,68 @@ export class QuoteRecipientMissingError extends ActionsError {
 
   constructor() {
     super('Quote.recipient missing. _getQuote must populate it')
+  }
+}
+
+/**
+ * Thrown when quote `execution.routerAddress` is not the provider's router.
+ * Re-deriving from static config binds provider and router before signing.
+ */
+export class RouterNotAllowedError extends ActionsError {
+  override name = 'RouterNotAllowedError' as const
+  provider: string
+  chainId: number
+  expected: string
+  received: string
+
+  constructor(params: {
+    provider: string
+    chainId: number
+    expected: string
+    received: string
+  }) {
+    super(
+      `Quote router ${params.received} is not the ${params.provider} router on chain ${params.chainId}`,
+      {
+        metaMessages: [
+          `Expected router: ${params.expected}`,
+          `Received router: ${params.received}`,
+        ],
+      },
+    )
+    this.provider = params.provider
+    this.chainId = params.chainId
+    this.expected = params.expected
+    this.received = params.received
+  }
+}
+
+/**
+ * Thrown when signed quote bytes do not match trusted quote metadata.
+ * The dispatch path decodes calldata and reconciles fund-moving fields.
+ */
+export class QuoteCalldataMismatchError extends ActionsError {
+  override name = 'QuoteCalldataMismatchError' as const
+  field: string
+  expected?: string
+  received?: string
+
+  constructor(params: {
+    field: string
+    expected?: string
+    received?: string
+    detail?: string
+  }) {
+    super(`Quote calldata does not match its metadata: ${params.field}`, {
+      metaMessages: [
+        ...(params.expected ? [`Expected: ${params.expected}`] : []),
+        ...(params.received ? [`Received: ${params.received}`] : []),
+        ...(params.detail ? [params.detail] : []),
+      ],
+    })
+    this.field = params.field
+    this.expected = params.expected
+    this.received = params.received
   }
 }
 

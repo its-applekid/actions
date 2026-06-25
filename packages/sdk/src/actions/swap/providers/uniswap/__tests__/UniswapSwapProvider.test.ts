@@ -2,10 +2,12 @@ import type { Address, PublicClient } from 'viem'
 import { baseSepolia } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
-import { MockWETHAsset } from '@/__mocks__/MockAssets.js'
+import { MockETHAsset, MockWETHAsset } from '@/__mocks__/MockAssets.js'
+import { computeMaxInput } from '@/actions/swap/providers/uniswap/encoding.js'
 import type { UniswapSwapProviderConfig } from '@/actions/swap/providers/uniswap/types.js'
 import { UniswapSwapProvider } from '@/actions/swap/providers/uniswap/UniswapSwapProvider.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { Asset } from '@/types/asset.js'
 
@@ -154,6 +156,36 @@ describe('UniswapSwapProvider', () => {
 
       // 1 USDC = 1000000 (6 decimals)
       expect(quote.amountInRaw).toBe(1000000n)
+    })
+
+    it('sets native exact-output value to the max input amount', async () => {
+      const provider = createProvider({
+        marketAllowlist: [
+          {
+            assets: [MockETHAsset, OP],
+            fee: 100,
+            tickSpacing: 2,
+            chainId: CHAIN_ID,
+          },
+        ],
+      })
+
+      const quote = await provider.getQuote({
+        assetIn: MockETHAsset,
+        assetOut: OP,
+        amountOut: 1,
+        chainId: CHAIN_ID,
+      })
+
+      const maxInput = computeMaxInput(quote.amountInRaw, quote.slippage)
+      expect(quote.execution.value).toBe(maxInput)
+      expect(quote.execution.value).toBeGreaterThan(quote.amountInRaw)
+      await expect(
+        provider.execute({
+          ...quote,
+          execution: { ...quote.execution, value: quote.amountInRaw },
+        }),
+      ).rejects.toThrow(QuoteCalldataMismatchError)
     })
   })
 

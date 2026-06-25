@@ -15,9 +15,11 @@ import {
   NativeAssetAddressError,
   ProtocolContractsNotConfiguredError,
   ProviderNotConfiguredError,
+  QuoteCalldataMismatchError,
   QuoteExpiredError,
   QuoteRecipientMismatchError,
   QuoteRecipientMissingError,
+  RouterNotAllowedError,
   TransactionConfirmedButRevertedError,
   ZeroAddressError,
 } from '@eth-optimism/actions-sdk'
@@ -122,6 +124,14 @@ const SDK_ERROR_MAPPINGS: ReadonlyArray<readonly [ErrorCtor, MappedSdkError]> =
         status: 403,
         message: 'Quote recipient does not match the executing wallet.',
       },
+    ],
+    [
+      RouterNotAllowedError,
+      { status: 400, message: 'Quote execution payload is invalid.' },
+    ],
+    [
+      QuoteCalldataMismatchError,
+      { status: 400, message: 'Quote execution payload is invalid.' },
     ],
     [
       ProviderNotConfiguredError,

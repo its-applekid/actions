@@ -1,4 +1,4 @@
-import type { PublicClient } from 'viem'
+import type { Address, PublicClient } from 'viem'
 
 import type { QuoteAmounts } from '@/actions/borrow/core/quote.js'
 import { encodeAaveBorrow } from '@/actions/borrow/providers/aave/calldata.js'
@@ -66,6 +66,7 @@ function finalizePlan(
     transactions: TransactionData[]
     approvalsSkipped: boolean
     quoteAmounts: QuoteAmounts
+    providerContext?: Record<string, unknown>
   },
 ): AaveQuoteArgs {
   return {
@@ -79,6 +80,7 @@ function finalizePlan(
     transactions: plan.transactions,
     quoteAmounts: plan.quoteAmounts,
     approvalsSkipped: plan.approvalsSkipped,
+    providerContext: plan.providerContext,
   }
 }
 
@@ -147,6 +149,9 @@ export async function buildAaveRepayQuoteArgs(
     transactions: txs,
     approvalsSkipped,
     quoteAmounts: { borrowAmountRaw: repayAmount },
+    providerContext: aaveProviderContext({
+      borrowAmountIsMax: 'max' in params.amount,
+    }),
   })
 }
 
@@ -204,7 +209,7 @@ export async function buildAaveWithdrawCollateralQuoteArgs(
   if (isMax && current.collateralAmount === 0n) {
     throw new EmptyPositionError({ operation: 'withdrawCollateral' })
   }
-  const txs = await buildAaveCollateralWithdraw({
+  const withdraw = await buildAaveCollateralWithdraw({
     client,
     config: market,
     amount,
@@ -216,10 +221,14 @@ export async function buildAaveWithdrawCollateralQuoteArgs(
     action: 'withdrawCollateral',
     collateralDelta: -amount,
     debtDelta: 0n,
-    transactions: txs,
+    transactions: withdraw.txs,
     // Native-ETH withdraws prepend a gateway aToken approval; direct ones don't.
-    approvalsSkipped: txs.length === 1,
+    approvalsSkipped: withdraw.txs.length === 1,
     quoteAmounts: { collateralAmountRaw: amount },
+    providerContext: aaveProviderContext({
+      collateralAmountIsMax: isMax,
+      gatewayApprovalToken: withdraw.gatewayApprovalToken,
+    }),
   })
 }
 
@@ -242,19 +251,23 @@ export async function buildAaveCloseQuoteArgs(
     approvalMode: params.approvalMode,
   })
   const txs = [...repay.txs]
+  const borrowAmountIsMax = 'max' in params.borrowAmount
 
   let collateralDelta = 0n
   let withdrawApprovalsSkipped = true
+  let providerContext: Record<string, unknown> | undefined
+  let collateralAmountIsMax = false
   if (params.collateralAmount !== undefined) {
     const { amount: withdrawAmount, isMax } = resolveAaveAmount(
       params.collateralAmount,
       current.collateralAmount,
     )
+    collateralAmountIsMax = isMax
     // A max close with no collateral has nothing to withdraw; emitting a
     // withdraw-all leg would revert, so the repay proceeds on its own.
     if (!(isMax && current.collateralAmount === 0n)) {
       collateralDelta = -withdrawAmount
-      const withdrawTxs = await buildAaveCollateralWithdraw({
+      const withdraw = await buildAaveCollateralWithdraw({
         client,
         config: market,
         amount: withdrawAmount,
@@ -263,8 +276,13 @@ export async function buildAaveCloseQuoteArgs(
         approvalMode: params.approvalMode,
       })
       // Native-ETH withdraws prepend a gateway aToken approval.
-      withdrawApprovalsSkipped = withdrawTxs.length === 1
-      txs.push(...withdrawTxs)
+      withdrawApprovalsSkipped = withdraw.txs.length === 1
+      txs.push(...withdraw.txs)
+      providerContext = aaveProviderContext({
+        borrowAmountIsMax,
+        collateralAmountIsMax,
+        gatewayApprovalToken: withdraw.gatewayApprovalToken,
+      })
     }
   }
 
@@ -274,9 +292,25 @@ export async function buildAaveCloseQuoteArgs(
     debtDelta: -repay.repayAmount,
     transactions: txs,
     approvalsSkipped: repay.approvalsSkipped && withdrawApprovalsSkipped,
+    providerContext:
+      providerContext ??
+      aaveProviderContext({ borrowAmountIsMax, collateralAmountIsMax }),
     quoteAmounts: {
       borrowAmountRaw: repay.repayAmount,
       collateralAmountRaw: collateralDelta < 0n ? -collateralDelta : undefined,
     },
   })
+}
+
+function aaveProviderContext(params: {
+  borrowAmountIsMax?: boolean
+  collateralAmountIsMax?: boolean
+  gatewayApprovalToken?: Address
+}): Record<string, unknown> | undefined {
+  const context: Record<string, unknown> = {}
+  if (params.borrowAmountIsMax) context.borrowAmountIsMax = true
+  if (params.collateralAmountIsMax) context.collateralAmountIsMax = true
+  if (params.gatewayApprovalToken)
+    context.aTokenAddress = params.gatewayApprovalToken
+  return Object.keys(context).length ? context : undefined
 }

@@ -1,3 +1,4 @@
+import type { Address } from 'viem'
 import { formatUnits } from 'viem'
 
 import { expandMarkets, findMarket } from '@/actions/swap/core/markets.js'
@@ -6,7 +7,9 @@ import {
   getSupportedChainIds,
   getUniswapAddresses,
 } from '@/actions/swap/providers/uniswap/addresses.js'
+import { assertUniswapV4QuoteBound } from '@/actions/swap/providers/uniswap/decode.js'
 import {
+  computeMaxInput,
   encodeUniversalRouterSwap,
   getQuote,
 } from '@/actions/swap/providers/uniswap/encoding.js'
@@ -20,7 +23,10 @@ import type {
 } from '@/actions/swap/providers/uniswap/types.js'
 import { UNISWAP } from '@/constants/providers.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
-import { AssetMetadataRequiredError } from '@/core/error/errors.js'
+import {
+  AssetMetadataRequiredError,
+  QuoteCalldataMismatchError,
+} from '@/core/error/errors.js'
 import type { ChainManager } from '@/services/ChainManager.js'
 import type { SwapQuoteParamsResolved } from '@/services/nameservices/ens/types.js'
 import type { SwapSettings } from '@/types/actions.js'
@@ -52,6 +58,34 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
     return getSupportedChainIds()
   }
 
+  protected canonicalRouterAddress(chainId: SupportedChainId): Address {
+    return getUniswapAddresses(chainId).universalRouter
+  }
+
+  /**
+   * Uniswap V4 carries no recipient argument (`TAKE_ALL` settles to
+   * `msg.sender`), so binding asserts the calldata is the canonical Universal
+   * Router swap of the quoted pair rather than decoding a recipient field.
+   */
+  protected assertSwapCalldataBound(quote: SwapQuote): void {
+    this.quoteInputBound(quote)
+  }
+
+  protected assertQuoteValue(quote: SwapQuote): void {
+    if (!isNativeAsset(quote.assetIn)) {
+      super.assertQuoteValue(quote)
+      return
+    }
+    const expected = this.quoteInputBound(quote)
+    if (quote.execution.value === expected) return
+    throw new QuoteCalldataMismatchError({
+      field: 'value',
+      expected: expected.toString(),
+      received: quote.execution.value.toString(),
+      detail: 'native-in Uniswap value must equal the calldata input bound',
+    })
+  }
+
   protected async _execute(
     params: ResolvedSwapParams,
   ): Promise<SwapTransaction> {
@@ -81,6 +115,9 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
 
   protected async _buildApprovals(quote: SwapQuote) {
     const addresses = getUniswapAddresses(quote.chainId)
+    const requiredAmount = isNativeAsset(quote.assetIn)
+      ? quote.amountInRaw
+      : this.quoteInputBound(quote)
 
     return this.buildPermit2Approvals(
       {
@@ -98,7 +135,7 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
           this._settings.approvalMode,
         ),
       },
-      quote.amountInRaw,
+      requiredAmount,
       addresses.permit2,
       addresses.universalRouter,
     )
@@ -145,6 +182,9 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
     })
 
     const finalAmountInRaw = amountOutRaw ? quote.amountInRaw : amountInRaw
+    const maxAmountInRaw = amountOutRaw
+      ? computeMaxInput(quote.amountInRaw, slippage)
+      : undefined
 
     const { amountOutMinRaw, amountOutMin } = this.computeSlippageBounds(
       quote.amountOutRaw,
@@ -169,7 +209,9 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       execution: {
         swapCalldata,
         routerAddress: addresses.universalRouter,
-        value: isNativeAsset(assetIn) ? (amountInRaw ?? 0n) : 0n,
+        value: isNativeAsset(assetIn)
+          ? (maxAmountInRaw ?? finalAmountInRaw)
+          : 0n,
         providerContext: {
           fee: marketConfig.fee,
           tickSpacing: marketConfig.tickSpacing,
@@ -235,5 +277,17 @@ export class UniswapSwapProvider extends SwapProvider<UniswapSwapProviderConfig>
       )
     }
     return config as UniswapMarketConfig & { fee: number; tickSpacing: number }
+  }
+
+  private quoteInputBound(quote: SwapQuote): bigint {
+    const market = this.resolveUniswapConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    return assertUniswapV4QuoteBound(quote, {
+      fee: market.fee,
+      tickSpacing: market.tickSpacing,
+    })
   }
 }

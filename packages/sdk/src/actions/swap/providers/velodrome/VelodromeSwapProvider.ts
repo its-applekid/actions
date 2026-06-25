@@ -1,3 +1,4 @@
+import type { Address } from 'viem'
 import { formatUnits } from 'viem'
 
 import { expandMarkets, findMarket } from '@/actions/swap/core/markets.js'
@@ -7,6 +8,7 @@ import {
   getSupportedChainIds,
   getValidMarketConfigs,
 } from '@/actions/swap/providers/velodrome/config.js'
+import { assertVelodromeQuoteBound } from '@/actions/swap/providers/velodrome/encoding/decode.js'
 import {
   encodePoolSwap,
   fetchPoolQuote,
@@ -62,6 +64,28 @@ export class VelodromeSwapProvider extends SwapProvider<VelodromeSwapProviderCon
   /** @returns Chain IDs where Velodrome/Aerodrome contracts are deployed */
   protocolSupportedChainIds(): SupportedChainId[] {
     return getSupportedChainIds()
+  }
+
+  protected canonicalRouterAddress(chainId: SupportedChainId): Address {
+    return getChainConfig(chainId).contracts.router
+  }
+
+  /**
+   * Velodrome encodes either the `msg.sender` sentinel (universal/CL routers)
+   * or a literal recipient (v2/leaf routers); the decoder dispatches on the
+   * actual calldata shape and asserts the executing wallet is the recipient.
+   */
+  protected assertSwapCalldataBound(quote: SwapQuote): void {
+    const pool = this.resolveVelodromeMarketConfig(
+      quote.assetIn,
+      quote.assetOut,
+      quote.chainId,
+    )
+    assertVelodromeQuoteBound(
+      quote,
+      pool,
+      getChainConfig(quote.chainId).contracts.poolFactory,
+    )
   }
 
   /**

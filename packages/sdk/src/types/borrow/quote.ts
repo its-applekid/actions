@@ -40,6 +40,8 @@ export interface BorrowQuoteExecution {
    * approval transaction was prepended.
    */
   approvalsSkipped?: boolean
+  /** Opaque provider-specific context used for calldata reconciliation. */
+  providerContext?: Record<string, unknown>
 }
 
 /**

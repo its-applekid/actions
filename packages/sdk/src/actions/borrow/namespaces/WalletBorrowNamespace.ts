@@ -1,9 +1,6 @@
 import { isAddressEqual } from 'viem'
 
-import {
-  validateBorrowMarketIdInAnyAllowlist,
-  validateQuoteAction,
-} from '@/actions/borrow/core/validations.js'
+import { validateQuoteAction } from '@/actions/borrow/core/validations.js'
 import { BaseBorrowNamespace } from '@/actions/borrow/namespaces/BaseBorrowNamespace.js'
 import { QUOTE_DISCRIMINATOR } from '@/actions/shared/quoteDiscriminator.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
@@ -191,7 +188,8 @@ export class WalletBorrowNamespace extends BaseBorrowNamespace {
     if (isBorrowQuote(params)) {
       return this.validateQuoteForThisWallet(params, expectedAction)
     }
-    return requote(params)
+    const quote = await requote(params)
+    return this.validateQuoteForThisWallet(quote, expectedAction)
   }
 
   /**
@@ -217,7 +215,10 @@ export class WalletBorrowNamespace extends BaseBorrowNamespace {
     validateQuoteAction(quote, expectedAction)
     validateQuoteNotExpired(quote.expiresAt)
     validateChainSupported(quote.marketId.chainId, this.supportedChainIds())
-    validateBorrowMarketIdInAnyAllowlist(quote.marketId, this.getAllProviders())
+    this.getProviderForMarket(quote.marketId).validateQuoteExecution(
+      quote,
+      this.wallet.address,
+    )
     return quote
   }
 
@@ -251,7 +252,7 @@ function isBorrowQuote<TParams extends { market: unknown }>(
   params: TParams | BorrowQuote,
 ): params is BorrowQuote {
   // Multi-field guard so raw params that happen to carry a `quotedAt`
-  // field don't pose as a pre-built quote — see the "re-quotes raw params
+  // field don't pose as a pre-built quote, see the "re-quotes raw params
   // that happen to include quotedAt" regression test.
   return (
     QUOTE_DISCRIMINATOR in params &&

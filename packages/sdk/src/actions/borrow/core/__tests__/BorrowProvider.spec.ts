@@ -41,16 +41,16 @@ class TestProvider extends BorrowProvider<BorrowProviderConfig> {
   public repayCalls: BorrowRepayInternalParams[] = []
   public marketCalls: BorrowMarket[] = []
 
-  public get marketKind(): 'morpho-blue' {
-    return 'morpho-blue'
-  }
-
   constructor(
     config: BorrowProviderConfig,
     chainManager: ChainManager,
     settings?: BorrowSettings,
   ) {
     super(config, chainManager, settings)
+  }
+
+  public get marketKind(): 'morpho-blue' {
+    return 'morpho-blue'
   }
 
   protocolSupportedChainIds(): number[] {
@@ -90,6 +90,14 @@ class TestProvider extends BorrowProvider<BorrowProviderConfig> {
   ): Promise<BorrowQuote> {
     this.repayCalls.push(params)
     return makeStubQuote('repay', params.market)
+  }
+
+  protected _validateQuoteExecution(
+    _quote: BorrowQuote,
+    _market: BorrowMarketConfig,
+    _walletAddress: `0x${string}`,
+  ): void {
+    // Core provider tests exercise shared validation, not protocol decoding.
   }
 
   protected async _getMarket(_: BorrowMarketConfig): Promise<BorrowMarket> {

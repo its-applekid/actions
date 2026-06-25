@@ -122,7 +122,7 @@ export async function getQuote(params: GetQuoteParams): Promise<SwapPrice> {
 
   const isExactInput = amountInRaw !== undefined
 
-  // Read pool mid-price and quote in parallel — no extra sequential RPC call
+  // Read pool mid-price and quote in parallel, no extra sequential RPC call.
   const [sqrtPriceX96, quoteResult] = await Promise.all([
     getPoolSqrtPrice({ publicClient, poolManagerAddress, poolKey }),
     isExactInput
@@ -248,8 +248,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
   let actionParams: Hex[]
 
   if (isExactInput) {
-    const minAmountOut =
-      (quote.amountOutRaw * BigInt(Math.round((1 - slippage) * 10000))) / 10000n
+    const minAmountOut = computeMinOutput(quote.amountOutRaw, slippage)
 
     actions =
       `0x${[SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
@@ -268,9 +267,7 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       encodeAbiParameters(CURRENCY_AMOUNT_PARAMS, [tokenOut, minAmountOut]),
     ]
   } else {
-    const maxAmountIn =
-      quote.amountInRaw +
-      (quote.amountInRaw * BigInt(Math.round(slippage * 10000))) / 10000n
+    const maxAmountIn = computeMaxInput(quote.amountInRaw, slippage)
 
     actions =
       `0x${[SWAP_EXACT_OUT_SINGLE, SETTLE_ALL, TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('')}` as Hex
@@ -308,6 +305,16 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
       BigInt(deadline),
     ],
   })
+}
+
+function computeMinOutput(amountOutRaw: bigint, slippage: number): bigint {
+  const slippageBps = BigInt(Math.round(slippage * 10_000))
+  return (amountOutRaw * (10_000n - slippageBps)) / 10_000n
+}
+
+export function computeMaxInput(amountInRaw: bigint, slippage: number): bigint {
+  const slippageBps = BigInt(Math.round(slippage * 10_000))
+  return amountInRaw + (amountInRaw * slippageBps) / 10_000n
 }
 
 function calculatePrice(
@@ -355,7 +362,7 @@ export async function getPoolSqrtPrice(params: {
     ]),
   )
 
-  // pools[poolId].slot0 — slot0 is at offset 0 from the mapping base
+  // pools[poolId].slot0: slot0 is at offset 0 from the mapping base.
   const slot = keccak256(
     encodeAbiParameters(
       [{ type: 'bytes32' }, { type: 'uint256' }],

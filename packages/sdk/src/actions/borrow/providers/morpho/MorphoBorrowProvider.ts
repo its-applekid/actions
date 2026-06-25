@@ -13,6 +13,7 @@ import {
   buildCloseTransactions,
   computeClose,
 } from '@/actions/borrow/providers/morpho/close.js'
+import { assertMorphoQuoteExecution } from '@/actions/borrow/providers/morpho/decode.js'
 import {
   computeMorphoMarketId,
   verifyMorphoMarketId,
@@ -182,6 +183,7 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
               : undefined,
         },
         approvalsSkipped: approvalTx === undefined,
+        providerContext: repaySharesContext(plan.repay.repaySharesWei),
       },
       params.walletAddress,
     )
@@ -315,9 +317,19 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
               : repay.repayAssetsWei,
         },
         approvalsSkipped: approvalTx === undefined,
+        providerContext: repaySharesContext(repay.repaySharesWei),
       },
       params.walletAddress,
     )
+  }
+
+  protected _validateQuoteExecution(
+    quote: BorrowQuote,
+    rawMarket: BorrowMarketConfig,
+    walletAddress: Address,
+  ): void {
+    const market = this.requireOwnMarket<MorphoBorrowMarketConfig>(rawMarket)
+    assertMorphoQuoteExecution(quote, market, walletAddress)
   }
 
   // Each `fetchX` wraps the corresponding `fetchMorphoX` in `state.ts` so
@@ -371,6 +383,13 @@ export class MorphoBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
   }
 }
 
+function repaySharesContext(
+  repaySharesRaw: bigint,
+): Record<string, unknown> | undefined {
+  if (repaySharesRaw === 0n) return undefined
+  return { repaySharesRaw }
+}
+
 interface AssembleMorphoQuoteArgs {
   action: BorrowAction
   market: MorphoBorrowMarketConfig
@@ -379,6 +398,7 @@ interface AssembleMorphoQuoteArgs {
   transactions: TransactionData[]
   quoteAmounts: QuoteAmounts
   approvalsSkipped: boolean
+  providerContext?: Record<string, unknown>
 }
 
 export type { MarketId, MorphoMarketParams }

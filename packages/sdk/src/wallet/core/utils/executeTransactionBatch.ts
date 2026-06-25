@@ -1,5 +1,7 @@
 import type { SupportedChainId } from '@/constants/supportedChains.js'
+import { InvalidParamsError } from '@/core/error/errors.js'
 import type { TransactionData } from '@/types/transaction.js'
+import { validateAddress, validateNotZeroAddress } from '@/utils/validation.js'
 import type {
   BatchTransactionReturnType,
   TransactionReturnType,
@@ -20,7 +22,7 @@ import type { Wallet } from '@/wallet/core/wallets/abstract/Wallet.js'
  * @param transactions - Non-empty list of transactions to dispatch
  * @param chainId - Target chain for the transactions
  * @returns Receipt(s) from the underlying send / sendBatch call
- * @throws Error if `transactions` is empty
+ * @throws InvalidParamsError if `transactions` is empty
  */
 export async function executeTransactionBatch(
   wallet: Wallet,
@@ -28,7 +30,15 @@ export async function executeTransactionBatch(
   chainId: SupportedChainId,
 ): Promise<TransactionReturnType | BatchTransactionReturnType> {
   if (transactions.length === 0) {
-    throw new Error('executeTransactionBatch: empty transaction list')
+    throw new InvalidParamsError({
+      param: 'transactions',
+      expected: 'at least one transaction',
+      received: '0',
+    })
+  }
+  for (const transaction of transactions) {
+    validateAddress(transaction.to, 'transaction.to')
+    validateNotZeroAddress(transaction.to, 'transaction.to')
   }
   if (transactions.length === 1) {
     return wallet.send(transactions[0], chainId)

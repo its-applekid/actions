@@ -159,6 +159,13 @@ export class MockBorrowProvider extends BorrowProvider<BorrowProviderConfig> {
   protected async _repay(_: BorrowRepayInternalParams): Promise<BorrowQuote> {
     throw new Error('MockBorrowProvider._repay should not be called')
   }
+  protected _validateQuoteExecution(
+    _quote: BorrowQuote,
+    _market: BorrowMarketConfig,
+    _walletAddress: `0x${string}`,
+  ): void {
+    // Mock quote calldata is test-defined; concrete providers own ABI checks.
+  }
   protected async _getMarket(_: BorrowMarketConfig): Promise<BorrowMarket> {
     throw new Error('MockBorrowProvider._getMarket should not be called')
   }
