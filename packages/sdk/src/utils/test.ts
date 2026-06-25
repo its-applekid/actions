@@ -8,6 +8,12 @@ import type { Chain, PublicClient } from 'viem'
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 
+import {
+  ForkE2EAnvilStartError,
+  ForkE2EConfigError,
+} from '@/utils/anvil/errors.js'
+import type { ForkHarness, ForkHarnessConfig } from '@/utils/anvil/types.js'
+
 /**
  * Standard anvil/foundry test accounts with predictable private keys
  * These are the default accounts created by anvil and are safe to use in tests
@@ -66,10 +72,12 @@ export interface AnvilFork {
 
 /**
  * Start an Anvil fork and wait until it accepts JSON-RPC requests.
+ * @description Spawns `anvil`, polls the local JSON-RPC endpoint, and returns
+ * once the fork can answer requests.
  * @param forkUrl - Upstream RPC URL to fork.
  * @param port - Local port for the Anvil JSON-RPC server.
  * @returns Fork metadata including process handle and local RPC URL.
- * @throws Error when the fork does not become ready in time.
+ * @throws ForkE2EAnvilStartError when Anvil cannot start or become ready.
  */
 export async function startAnvilFork(
   forkUrl: string,
@@ -82,30 +90,127 @@ export async function startAnvilFork(
   )
 
   const rpcUrl = `http://127.0.0.1:${port}`
-  for (let i = 0; i < 30; i++) {
-    try {
-      const res = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_blockNumber',
-          params: [],
-          id: 1,
-        }),
-      })
-      if (res.ok) return { port, process: proc, rpcUrl }
-    } catch {
-      // Anvil is still starting.
+  const startupError = watchAnvilStartErrors(proc, port)
+  try {
+    for (let i = 0; i < 30; i++) {
+      const ready = await Promise.race([
+        isAnvilReady(rpcUrl),
+        startupError.promise,
+      ])
+      if (ready) return { port, process: proc, rpcUrl }
+      await Promise.race([sleep(500), startupError.promise])
     }
-    await new Promise((r) => setTimeout(r, 500))
+    throw new ForkE2EAnvilStartError({
+      details: 'Timed out waiting for JSON-RPC readiness.',
+      port,
+    })
+  } catch (error) {
+    proc.kill()
+    throw error
+  } finally {
+    startupError.cleanup()
   }
-  proc.kill()
-  throw new Error(`Anvil fork on port ${port} did not start in time`)
+}
+
+function watchAnvilStartErrors(
+  proc: ChildProcess,
+  port: number,
+): { cleanup: () => void; promise: Promise<never> } {
+  let cleanup = () => {}
+  const promise = new Promise<never>((_, reject) => {
+    const onError = (cause: Error) => {
+      reject(new ForkE2EAnvilStartError({ cause, port }))
+    }
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      reject(
+        new ForkE2EAnvilStartError({
+          details: formatAnvilExitDetails(code, signal),
+          port,
+        }),
+      )
+    }
+    proc.once('error', onError)
+    proc.once('exit', onExit)
+    cleanup = () => {
+      proc.off('error', onError)
+      proc.off('exit', onExit)
+    }
+  })
+  return { cleanup, promise }
+}
+
+function formatAnvilExitDetails(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): string {
+  return [
+    'Anvil exited before accepting JSON-RPC requests.',
+    `exit code: ${code ?? 'unknown'}.`,
+    `signal: ${signal ?? 'none'}.`,
+  ].join(' ')
+}
+
+async function isAnvilReady(rpcUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_blockNumber',
+        params: [],
+        id: 1,
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Start or attach to an Anvil fork.
+ * @description Uses `rpcUrl` as an already-running shared fork when provided.
+ * Otherwise starts a local Anvil process from `forkUrl` on `port`.
+ * @param config - Fork chain, RPC, and optional process-start settings.
+ * @returns Fork harness with public client, RPC URL, and cleanup callback.
+ * @throws ForkE2EConfigError when neither attach nor start settings are usable.
+ */
+export async function startOrAttachAnvilFork(
+  config: ForkHarnessConfig,
+): Promise<ForkHarness> {
+  if (config.mode === 'attach') return attachFork(config, config.rpcUrl)
+  if (config.mode !== 'start') throw new ForkE2EConfigError('Unknown mode.')
+
+  const fork = await startAnvilFork(config.forkUrl, config.port)
+  return {
+    ...attachFork(config, fork.rpcUrl),
+    fork,
+    stop: () => stopAnvilFork(fork),
+  }
+}
+
+function attachFork(config: ForkHarnessConfig, rpcUrl: string): ForkHarness {
+  return {
+    chain: config.chain,
+    chainId: config.chainId,
+    publicClient: createPublicClient({
+      chain: config.chain,
+      transport: http(rpcUrl),
+    }),
+    rpcUrl,
+    stop: () => {},
+  }
 }
 
 /**
  * Stop a running Anvil fork process.
+ * @description Terminates the local Anvil child process returned by
+ * `startAnvilFork`.
  * @param fork - Fork process returned by `startAnvilFork`.
  * @returns Nothing.
  */
