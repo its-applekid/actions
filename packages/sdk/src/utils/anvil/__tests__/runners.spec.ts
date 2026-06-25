@@ -17,6 +17,7 @@ import {
   getSnapshotBalance,
   runForkLendProviderE2E,
   runForkSwapProviderE2E,
+  runForkWalletBatchSendE2E,
   runForkWalletSendE2E,
 } from '@/utils/anvil/index.js'
 import type { ForkLendTarget } from '@/utils/anvil/types.js'
@@ -44,6 +45,34 @@ describe('anvil action runners', () => {
     )
     expect(result.result).toBe(receipt)
     expect(getSnapshotBalance(result.after, ETH)).toBe(9n)
+  })
+
+  it('runs a wallet batch-send scenario through the public wallet API', async () => {
+    const publicClient = createPublicClientMock({
+      ethBalances: [10n, 8n],
+      tokenBalances: [],
+    })
+    const receipts = [
+      createReceipt('success', TX_HASH),
+      createReceipt('success', TX_HASH),
+    ]
+    const sendBatch = vi.fn().mockResolvedValue(receipts)
+    const wallet = { address: WALLET_ADDRESS, sendBatch }
+    const transactions = [
+      { data: '0x', to: TOKEN_ADDRESS, value: 1n },
+      { data: '0x', to: TOKEN_ADDRESS, value: 1n },
+    ] as const
+
+    const result = await runForkWalletBatchSendE2E(wallet, {
+      balanceAssets: [ETH],
+      chainId: CHAIN_ID,
+      publicClient,
+      transactions,
+    })
+
+    expect(sendBatch).toHaveBeenCalledWith(transactions, CHAIN_ID)
+    expect(result.result).toBe(receipts)
+    expect(getSnapshotBalance(result.after, ETH)).toBe(8n)
   })
 
   it('runs a swap scenario through the public wallet namespace', async () => {

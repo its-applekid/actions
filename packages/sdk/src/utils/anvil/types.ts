@@ -19,7 +19,10 @@ import type {
 import type { SwapReceipt, WalletSwapParams } from '@/types/swap/index.js'
 import type { TransactionData } from '@/types/transaction.js'
 import type { AnvilFork } from '@/utils/test.js'
-import type { TransactionReturnType } from '@/wallet/core/wallets/abstract/types/index.js'
+import type {
+  BatchTransactionReturnType,
+  TransactionReturnType,
+} from '@/wallet/core/wallets/abstract/types/index.js'
 import type { NodeProviderTypes } from '@/wallet/node/providers/hosted/types/index.js'
 
 export type ForkActionsConfig<
@@ -112,6 +115,14 @@ export interface ForkWalletSendTarget {
   ) => Promise<TransactionReturnType>
 }
 
+export interface ForkWalletBatchSendTarget {
+  address: `0x${string}`
+  sendBatch: (
+    transactions: readonly TransactionData[],
+    chainId: SupportedChainId,
+  ) => Promise<BatchTransactionReturnType>
+}
+
 export interface ForkSwapTarget {
   address: `0x${string}`
   swap?: {
@@ -149,6 +160,11 @@ export interface ForkBorrowTarget {
 export interface ForkWalletSendScenario extends ForkScenarioContext {
   balanceAssets?: readonly Asset[]
   transaction: TransactionData
+}
+
+export interface ForkWalletBatchSendScenario extends ForkScenarioContext {
+  balanceAssets?: readonly Asset[]
+  transactions: readonly TransactionData[]
 }
 
 export interface ForkSwapScenario extends ForkScenarioContext {
