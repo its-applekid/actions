@@ -1,3 +1,5 @@
+import type { Address } from 'viem'
+
 import type { Asset } from '@/types/asset.js'
 import type { BorrowReceipt } from '@/types/borrow/index.js'
 import type { LendTransactionReceipt } from '@/types/lend/index.js'
@@ -6,6 +8,7 @@ import { snapshotTokenBalances } from '@/utils/anvil/balances.js'
 import { ForkE2EConfigError } from '@/utils/anvil/errors.js'
 import { assertSuccessfulReceipts } from '@/utils/anvil/receipts.js'
 import type {
+  ForkBalanceSnapshots,
   ForkBorrowActionScenario,
   ForkBorrowScenario,
   ForkBorrowTarget,
@@ -14,6 +17,7 @@ import type {
   ForkLendTarget,
   ForkScenarioContext,
   ForkScenarioRunResult,
+  ForkSnapshotAddresses,
   ForkSwapScenario,
   ForkSwapTarget,
   ForkWalletBatchSendScenario,
@@ -29,7 +33,7 @@ import type {
 /**
  * Run a standard wallet send e2e scenario.
  * @description Sends one transaction through the public wallet API, asserts
- * the mined receipt succeeded, and snapshots selected balances around it.
+ * the mined receipt succeeded, and snapshots selected addresses around it.
  * @param wallet - SDK wallet created from `setupForkActions`.
  * @param scenario - Wallet send scenario.
  * @returns Before snapshot, wallet receipt, and after snapshot.
@@ -53,7 +57,7 @@ export async function runForkWalletSendE2E(
 /**
  * Run a standard wallet batch-send e2e scenario.
  * @description Sends a transaction list through the public wallet batch API,
- * asserts all mined receipts succeeded, and snapshots selected balances.
+ * asserts all mined receipts succeeded, and snapshots selected addresses.
  * @param wallet - SDK wallet created from `setupForkActions`.
  * @param scenario - Wallet batch-send scenario.
  * @returns Before snapshot, wallet batch receipt, and after snapshot.
@@ -77,7 +81,7 @@ export async function runForkWalletBatchSendE2E(
 /**
  * Run a standard swap provider e2e scenario.
  * @description Executes `wallet.swap.execute` through the public SDK surface,
- * asserts receipts, and snapshots input/output token balances.
+ * asserts receipts, and snapshots selected addresses for input/output tokens.
  * @param wallet - SDK wallet created from `setupForkActions`.
  * @param scenario - Swap scenario and optional balance override.
  * @returns Before snapshot, swap receipt, and after snapshot.
@@ -99,7 +103,7 @@ export async function runForkSwapProviderE2E(
 /**
  * Run a standard lend provider e2e scenario.
  * @description Executes a lend open or close through `wallet.lend`, asserts
- * receipts, and snapshots configured balances.
+ * receipts, and snapshots configured addresses.
  * @param wallet - SDK wallet created from `setupForkActions`.
  * @param scenario - Lend scenario and optional balance override.
  * @returns Before snapshot, lend receipt, and after snapshot.
@@ -117,7 +121,7 @@ export async function runForkLendProviderE2E(
 /**
  * Run a standard borrow provider e2e scenario.
  * @description Executes a borrow action through `wallet.borrow`, asserts
- * receipts, and snapshots collateral/borrow token balances by default.
+ * receipts, and snapshots configured addresses for collateral/borrow tokens.
  * @param wallet - SDK wallet created from `setupForkActions`.
  * @param scenario - Borrow scenario and optional balance override.
  * @returns Before snapshot, borrow receipt, and after snapshot.
@@ -140,15 +144,52 @@ export async function runForkBorrowProviderE2E(
 }
 
 async function runWithSnapshots<TResult>(
-  wallet: { address: `0x${string}` },
+  wallet: { address: Address },
   context: ForkScenarioContext,
   assets: readonly Asset[],
   action: () => Promise<TResult>,
 ): Promise<ForkScenarioRunResult<TResult>> {
-  const before = await snapshotTokenBalances(context, wallet.address, assets)
+  const addresses = snapshotAddresses(wallet.address, context)
+  const beforeSnapshots = await snapshotScenarioBalances(
+    context,
+    addresses,
+    assets,
+  )
   const result = await action()
-  const after = await snapshotTokenBalances(context, wallet.address, assets)
-  return { after, before, result }
+  const afterSnapshots = await snapshotScenarioBalances(
+    context,
+    addresses,
+    assets,
+  )
+  return {
+    after: afterSnapshots[0],
+    afterSnapshots,
+    before: beforeSnapshots[0],
+    beforeSnapshots,
+    result,
+  }
+}
+
+function snapshotAddresses(
+  walletAddress: Address,
+  context: ForkScenarioContext,
+): ForkSnapshotAddresses {
+  return context.snapshotAddresses ?? [walletAddress]
+}
+
+async function snapshotScenarioBalances(
+  context: ForkScenarioContext,
+  addresses: ForkSnapshotAddresses,
+  assets: readonly Asset[],
+): Promise<ForkBalanceSnapshots> {
+  const [firstAddress, ...otherAddresses] = addresses
+  const first = await snapshotTokenBalances(context, firstAddress, assets)
+  const remaining = await Promise.all(
+    otherAddresses.map((address) =>
+      snapshotTokenBalances(context, address, assets),
+    ),
+  )
+  return [first, ...remaining]
 }
 
 function swapAssets(scenario: ForkSwapScenario): readonly Asset[] {

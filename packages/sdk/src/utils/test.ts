@@ -121,10 +121,33 @@ function watchAnvilStartErrors(
     const onError = (cause: Error) => {
       reject(new ForkE2EAnvilStartError({ cause, port }))
     }
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      reject(
+        new ForkE2EAnvilStartError({
+          details: formatAnvilExitDetails(code, signal),
+          port,
+        }),
+      )
+    }
     proc.once('error', onError)
-    cleanup = () => proc.off('error', onError)
+    proc.once('exit', onExit)
+    cleanup = () => {
+      proc.off('error', onError)
+      proc.off('exit', onExit)
+    }
   })
   return { cleanup, promise }
+}
+
+function formatAnvilExitDetails(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): string {
+  return [
+    'Anvil exited before accepting JSON-RPC requests.',
+    `exit code: ${code ?? 'unknown'}.`,
+    `signal: ${signal ?? 'none'}.`,
+  ].join(' ')
 }
 
 async function isAnvilReady(rpcUrl: string): Promise<boolean> {
