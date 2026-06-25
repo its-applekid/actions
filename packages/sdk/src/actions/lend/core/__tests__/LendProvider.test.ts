@@ -3,14 +3,22 @@ import { describe, expect, it } from 'vitest'
 
 import { MockUSDCAsset } from '@/__mocks__/MockAssets.js'
 import { MockLendProvider } from '@/actions/lend/__mocks__/MockLendProvider.js'
-import { LendProvider } from '@/actions/lend/core/LendProvider.js'
+import type { Asset } from '@/types/asset.js'
 import type {
   LendMarketConfig,
   LendMarketId,
-  LendOpenPositionParams,
   LendTransaction,
 } from '@/types/lend/index.js'
 import { validateChainSupported } from '@/utils/validation.js'
+
+import {
+  callOpen as callBaseOpenPosition,
+  LEND_TEST_MARKET_ASSET as MARKET_ASSET,
+  marketConfig,
+} from './lendProviderTestUtils.js'
+
+const VAULT = '0x2222222222222222222222222222222222222222' as Address
+const WALLET = '0x3333333333333333333333333333333333333333' as Address
 
 // Test helper class that exposes protected validation methods as public
 class TestLendProvider extends MockLendProvider {
@@ -104,10 +112,11 @@ describe('LendProvider', () => {
 
     it('should accept asset filtering parameter', async () => {
       const provider = new MockLendProvider()
-      const mockAsset = {
-        metadata: { symbol: 'USDC', name: 'USD Coin' },
+      const mockAsset: Asset = {
+        metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
         address: { 84532: '0x123' as Address },
-      } as any
+        type: 'erc20',
+      }
 
       const markets = await provider.getMarkets({ asset: mockAsset })
       expect(Array.isArray(markets)).toBe(true)
@@ -174,9 +183,10 @@ describe('LendProvider', () => {
   })
 
   describe('approvalMode resolution', () => {
+    // The caller asset must match the resolved, allowlisted market underlying.
     const mockAsset = {
       address: {
-        84532: '0x1111111111111111111111111111111111111111' as Address,
+        84532: MARKET_ASSET,
       },
       metadata: { symbol: 'USDC', name: 'USD Coin', decimals: 6 },
       type: 'erc20' as const,
@@ -185,34 +195,22 @@ describe('LendProvider', () => {
       amount: 1000,
       asset: mockAsset,
       marketId: {
-        address: '0x2222222222222222222222222222222222222222' as Address,
+        address: VAULT,
         chainId: 84532,
       } as LendMarketId,
-      walletAddress: '0x3333333333333333333333333333333333333333' as Address,
+      walletAddress: WALLET,
     }
-
-    // MockLendProvider replaces `openPosition` with a vi.fn() in its
-    // constructor. To exercise the real base-class flow (which builds the
-    // approval tx around `_openPosition`'s output), call through the prototype.
-    const callBaseOpenPosition = (
-      provider: MockLendProvider,
-      params: LendOpenPositionParams,
-    ): Promise<LendTransaction> =>
-      LendProvider.prototype.openPosition.call(
-        provider,
-        params,
-      ) as Promise<LendTransaction>
+    const allowlist: LendMarketConfig[] = [marketConfig(VAULT)]
 
     // Last 32 bytes of approve(spender, amount) hold `amount`.
     const approvalAmountHex = (result: LendTransaction): string =>
       (result.transactionData.approval?.data ?? '').slice(-64)
 
-    // 1000 USDC at 6 decimals = 1_000_000_000 = 0x3b9aca00
-    const EXACT_AMOUNT_HEX = '3b9aca00'
+    const EXACT_AMOUNT_HEX = (1000n * 10n ** 18n).toString(16)
     const MAX_UINT256_HEX = 'f'.repeat(64)
 
     it('defaults to "exact". approval encodes the required amount', async () => {
-      const provider = new MockLendProvider()
+      const provider = new MockLendProvider({ marketAllowlist: allowlist })
       const result = await callBaseOpenPosition(provider, baseParams)
       expect(approvalAmountHex(result).replace(/^0+/, '')).toBe(
         EXACT_AMOUNT_HEX,
@@ -220,7 +218,7 @@ describe('LendProvider', () => {
     })
 
     it('honours per-call "max" override. approval uses maxUint256', async () => {
-      const provider = new MockLendProvider()
+      const provider = new MockLendProvider({ marketAllowlist: allowlist })
       const result = await callBaseOpenPosition(provider, {
         ...baseParams,
         approvalMode: 'max',
@@ -229,13 +227,19 @@ describe('LendProvider', () => {
     })
 
     it('honours per-provider config approvalMode default', async () => {
-      const provider = new MockLendProvider({ approvalMode: 'max' })
+      const provider = new MockLendProvider({
+        marketAllowlist: allowlist,
+        approvalMode: 'max',
+      })
       const result = await callBaseOpenPosition(provider, baseParams)
       expect(approvalAmountHex(result)).toBe(MAX_UINT256_HEX)
     })
 
     it('per-call override beats per-provider config', async () => {
-      const provider = new MockLendProvider({ approvalMode: 'max' })
+      const provider = new MockLendProvider({
+        marketAllowlist: allowlist,
+        approvalMode: 'max',
+      })
       const result = await callBaseOpenPosition(provider, {
         ...baseParams,
         approvalMode: 'exact',

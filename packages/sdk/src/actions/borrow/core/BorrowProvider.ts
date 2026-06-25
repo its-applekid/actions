@@ -8,7 +8,10 @@ import {
   buildRepayInternalParams,
   buildWithdrawCollateralInternalParams,
 } from '@/actions/borrow/core/internalParams.js'
-import { requireAllowlistedBorrowMarketConfig } from '@/actions/borrow/core/validations.js'
+import {
+  requireAllowlistedBorrowMarketConfig,
+  selectAllowlistedBorrowMarketConfigs,
+} from '@/actions/borrow/core/validations.js'
 import { BaseActionProvider } from '@/actions/shared/BaseActionProvider.js'
 import { DEFAULT_QUOTE_EXPIRATION_SECONDS } from '@/actions/shared/defaults.js'
 import { filterMatchingConfigs } from '@/actions/shared/marketConfigs.js'
@@ -50,7 +53,7 @@ const DEFAULTS = {
  * `MorphoBorrowProvider`) implement the protected `_*` hooks that produce
  * protocol-specific calldata and read on-chain state.
  *
- * Settings resolve via precedence: per-call → provider → shared settings →
+ * Settings resolve by precedence: per-call, provider, shared settings, then
  * hardcoded default.
  */
 export abstract class BorrowProvider<
@@ -67,11 +70,12 @@ export abstract class BorrowProvider<
   /**
    * The `BorrowMarketId` discriminator this provider services. Lets the
    * namespace route a market to its provider by kind without naming concrete
-   * providers, and is the fallback when a provider carries no market allowlist.
+   * providers. Provider read/write methods still fail closed when the resolved
+   * provider has an empty or omitted market allowlist.
    */
   public abstract get marketKind(): BorrowMarketId['kind']
 
-  /** Resolved quote expiration in seconds: provider → settings → `DEFAULT_QUOTE_EXPIRATION_SECONDS`. */
+  /** Resolved quote expiration in seconds: provider, settings, then `DEFAULT_QUOTE_EXPIRATION_SECONDS`. */
   public get quoteExpirationSeconds(): number {
     return (
       this._config.quoteExpirationSeconds ??
@@ -80,14 +84,14 @@ export abstract class BorrowProvider<
     )
   }
 
-  /** Resolved shared health-buffer default: settings → 0.05. */
+  /** Resolved shared health-buffer default: settings, then 0.05. */
   public get defaultHealthBufferPct(): number {
     return this._settings.healthBufferPct ?? DEFAULTS.healthBufferPct
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
   // Public action methods
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
 
   /**
    * Open or increase a borrow position.
@@ -185,9 +189,9 @@ export abstract class BorrowProvider<
     return this._repay(buildRepayInternalParams({ ...params, market }, base))
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
   // Public read methods
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
 
   /**
    * Read one configured borrow market.
@@ -208,6 +212,8 @@ export abstract class BorrowProvider<
    * List configured borrow markets.
    * @description Applies optional client-side filters against the provider
    * allowlist before delegating protocol reads to the concrete provider.
+   * Caller-supplied `markets` can only narrow the configured allowlist; omitted
+   * or empty allowlists return no markets.
    * @param params - Optional chain and asset filters.
    * @returns Borrow markets matching the supplied filters.
    * @throws ChainNotSupportedError when a requested chain is unsupported.
@@ -218,7 +224,12 @@ export abstract class BorrowProvider<
     if (params.chainId !== undefined) {
       this.assertChainSupported(params.chainId)
     }
-    const filtered = filterMatchingConfigs(this._config.marketAllowlist, [
+    const candidates = params.markets ?? this._config.marketAllowlist ?? []
+    const allowedMarkets = selectAllowlistedBorrowMarketConfigs(
+      candidates,
+      this._config,
+    )
+    const filteredMarkets = filterMatchingConfigs(allowedMarkets, [
       params.chainId === undefined
         ? undefined
         : (market) => market.chainId === params.chainId,
@@ -229,9 +240,10 @@ export abstract class BorrowProvider<
         ? undefined
         : (market) => market.borrowAsset === params.borrowAsset,
     ])
+    // Caller-supplied markets only narrow the allowlist; normal filters still apply.
     return this._getMarkets({
       ...params,
-      markets: params.markets ?? filtered,
+      markets: filteredMarkets,
     })
   }
 
@@ -255,13 +267,13 @@ export abstract class BorrowProvider<
     return this._getPosition({ market, walletAddress: params.walletAddress })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
   // Protected helpers
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
 
   /**
    * Resolve the health-buffer percentage for a market.
-   * @description Precedence: per-market override → shared settings → `0.05`.
+   * @description Precedence: per-market override, shared settings, then `0.05`.
    */
   protected resolveHealthBufferPct(market: BorrowMarketConfig): number {
     return market.healthBufferPct ?? this.defaultHealthBufferPct
@@ -320,9 +332,9 @@ export abstract class BorrowProvider<
     return { market, base }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
   // Abstract action hooks (implemented per protocol)
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
 
   protected abstract _openPosition(
     params: BorrowOpenPositionInternalParams,
@@ -344,9 +356,9 @@ export abstract class BorrowProvider<
     params: BorrowRepayInternalParams,
   ): Promise<BorrowQuote>
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
   // Abstract read hooks
-  // ─────────────────────────────────────────────────────────────────────────
+  // -------------------------------------------------------------------------
 
   protected abstract _getMarket(
     market: BorrowMarketConfig,

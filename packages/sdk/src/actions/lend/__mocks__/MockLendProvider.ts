@@ -141,11 +141,17 @@ export class MockLendProvider extends LendProvider<LendProviderConfig> {
   /**
    * Helper method to simulate errors
    */
-  simulateError(method: keyof MockLendProvider, error: Error) {
-    const mockMethod = this[method] as MockedFunction<any>
-    if (mockMethod && typeof mockMethod.mockRejectedValue === 'function') {
-      mockMethod.mockRejectedValue(error)
-    }
+  simulateError(
+    method:
+      | 'openPosition'
+      | 'getMarket'
+      | 'getMarkets'
+      | 'getPosition'
+      | 'closePosition'
+      | 'withdraw',
+    error: Error,
+  ) {
+    this[method].mockRejectedValue(error)
   }
 
   /**
@@ -196,9 +202,17 @@ export class MockLendProvider extends LendProvider<LendProviderConfig> {
   }
 
   protected async _getMarkets(
-    _params: GetLendMarketsParams,
+    params: GetLendMarketsParams,
   ): Promise<LendMarket[]> {
-    return this.createMockMarkets()
+    // Echo resolved markets so allowlist-intersection tests observe the survivors.
+    return Promise.all(
+      (params.markets ?? []).map((market) =>
+        this.createMockMarket({
+          address: market.address,
+          chainId: market.chainId,
+        }),
+      ),
+    )
   }
 
   protected async _getPosition(

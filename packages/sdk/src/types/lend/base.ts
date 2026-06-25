@@ -266,9 +266,9 @@ export interface LendOpenPositionInternalParams extends Omit<
  * `LendProvider` consumes this to build the surrounding `LendTransaction`,
  * including the ERC-20 approval transaction (if any). Providers describe
  * **what** the deposit looks like; the base derives **how** the approval is
- * built from `params.asset` (native vs. ERC-20).
+ * built from the trusted market asset (native vs. ERC-20).
  *
- * For native-asset deposits, omit `spender` — the base reads `params.asset.type`
+ * For native-asset deposits, omit `spender`; the base reads `params.asset.type`
  * and skips approval construction entirely. For ERC-20 deposits, `spender` is
  * required and the base will throw if it's missing.
  */
@@ -333,10 +333,11 @@ export interface GetPositionParams {
 
 /**
  * Parameters for getting lending markets
- * @description Parameters for filtering lending markets
+ * @description Results are constrained to configured provider allowlists.
+ * Caller-supplied `markets` can only narrow those allowlists.
  */
 export interface GetLendMarketsParams extends FilterAssetChain {
-  /** Optional pre-filtered market configs */
+  /** Market configs used to narrow configured allowlists */
   markets?: LendMarketConfig[]
 }
 

@@ -102,11 +102,10 @@ export class BaseBorrowNamespace extends BaseNamespace<
 
   /**
    * Pick the provider whose allowlist contains this market.
-   * @description Falls back to routing by the market's `kind` discriminator
-   * when no allowlist hit is found (covers providers configured without an
-   * explicit allowlist). Each provider declares the kind it services, so this
-   * stays generic as new borrow providers ship. Throws if no provider is
-   * registered for the market's protocol.
+   * @description Prefers an allowlist hit, then falls back to the market's
+   * `kind` discriminator only to choose a provider for the subsequent call.
+   * Provider read/write methods still enforce their own allowlist/blocklist
+   * checks, so an empty or omitted allowlist permits no markets.
    */
   protected getProviderForMarket(
     marketId: BorrowMarketId,

@@ -2,6 +2,7 @@ import type { Address } from 'viem'
 
 import {
   lendMarketIdMatches,
+  selectAllowedLendMarkets,
   validateMarketAsset,
 } from '@/actions/lend/utils/markets.js'
 import { BaseActionProvider } from '@/actions/shared/BaseActionProvider.js'
@@ -11,7 +12,6 @@ import {
 } from '@/actions/shared/marketConfigs.js'
 import type { SupportedChainId } from '@/constants/supportedChains.js'
 import {
-  AssetMetadataRequiredError,
   MarketIdRequiredError,
   MarketNotAllowedError,
 } from '@/core/error/errors.js'
@@ -75,29 +75,40 @@ export abstract class LendProvider<
 
   /**
    * Open a lending position
-   * @param amount - Amount to lend (human-readable number)
-   * @param asset - Asset to lend
-   * @param marketId - Market identifier containing address and chainId
-   * @param options - Optional lending configuration
+   * @description Validates wallet, chain, market allowlist/blocklist, and the
+   * caller asset against the resolved market underlying before amount parsing,
+   * provider routing, or approval construction.
+   * @param params - Market, asset, wallet, amount, and optional approval mode
    * @returns Promise resolving to lending transaction details
+   * @throws MarketNotAllowedError when the market is not allowlisted, is
+   * blocklisted, or the caller asset does not match the market underlying
    */
   async openPosition(params: LendOpenPositionParams): Promise<LendTransaction> {
     validateWalletAddress(params.walletAddress)
 
     this.validateMarketAllowed(params.marketId)
 
-    // Convert human-readable amount to wei using the asset's decimals
-    const amountWei = parseAssetAmount(params.asset, params.amount)
+    // Mirror closePosition's asset guard before building approvals or deposits.
+    const market = await this.getMarket({
+      address: params.marketId.address,
+      chainId: params.marketId.chainId,
+    })
+    validateMarketAsset(market, params.asset)
+    const trustedAsset = market.asset
+
+    // Convert human-readable amount to wei using the market asset's decimals.
+    const amountWei = parseAssetAmount(trustedAsset, params.amount)
 
     const position = await this._openPosition({
       ...params,
+      asset: trustedAsset,
       amountWei,
       walletAddress: params.walletAddress,
     })
 
     // Native deposits send ETH inline as msg.value; no approval is needed.
     // ERC-20 deposits resolve approval mode and build an approve(spender, amount) tx.
-    const approval = isNativeAsset(params.asset)
+    const approval = isNativeAsset(trustedAsset)
       ? undefined
       : this.buildLendApproval({
           position,
@@ -135,13 +146,21 @@ export abstract class LendProvider<
 
   /**
    * Get list of available lending markets
-   * @param params - Optional filtering parameters
+   * @description Lists configured allowlisted markets after dropping
+   * blocklisted entries. Caller-supplied `markets` can only narrow the
+   * configured allowlist; omitted or empty allowlists return no markets.
+   * @param params - Optional chain, asset, and market-narrowing filters
    * @returns Promise resolving to array of market information
+   * @throws ChainNotSupportedError when a requested chain is unsupported
    */
   async getMarkets(params: GetLendMarketsParams = {}): Promise<LendMarket[]> {
     if (params.chainId !== undefined) this.assertChainSupported(params.chainId)
 
+    // Caller-supplied markets only narrow the allowlist; normal filters still apply.
+    const candidates = params.markets ?? this._config.marketAllowlist ?? []
+    const allowedMarkets = selectAllowedLendMarkets(candidates, this._config)
     const filteredMarkets = this.filterMarketConfigs(
+      allowedMarkets,
       params.chainId,
       params.asset,
     )
@@ -149,7 +168,7 @@ export abstract class LendProvider<
     return this._getMarkets({
       asset: params.asset,
       chainId: params.chainId,
-      markets: params.markets || filteredMarkets,
+      markets: filteredMarkets,
     })
   }
 
@@ -185,12 +204,13 @@ export abstract class LendProvider<
 
   /**
    * Close a lending position (withdraw assets from a market)
-   * @param amount - Amount to withdraw (human-readable number)
-   * @param asset - Asset to withdraw (optional, validated against marketId)
-   * @param marketId - Market identifier containing address and chainId
-   * @param walletAddress - Wallet address for receiving assets and as owner
-   * @param options - Optional withdrawal configuration
+   * @description Validates wallet, chain, market allowlist/blocklist, and any
+   * caller asset against the resolved market underlying before using the trusted
+   * market asset for amount parsing and provider routing.
+   * @param params - Market, optional asset, wallet, amount, and withdrawal options
    * @returns Promise resolving to withdrawal transaction details
+   * @throws MarketNotAllowedError when the market is not allowlisted, is
+   * blocklisted, or the caller asset does not match the market underlying
    */
   async closePosition(params: ClosePositionParams): Promise<LendTransaction> {
     validateWalletAddress(params.walletAddress)
@@ -205,20 +225,13 @@ export abstract class LendProvider<
     if (params.asset) {
       validateMarketAsset(market, params.asset)
     }
+    const trustedAsset = market.asset
 
-    const assetMetadata = params.asset?.metadata
-    if (!assetMetadata) {
-      throw new AssetMetadataRequiredError('decimal conversion')
-    }
-
-    // Convert human-readable amount to wei using the asset's decimals
-    const amountWei = parseAssetAmount(
-      params.asset ?? market.asset,
-      params.amount,
-    )
+    // Convert human-readable amount to wei using the market asset's decimals.
+    const amountWei = parseAssetAmount(trustedAsset, params.amount)
 
     return this._closePosition({
-      asset: params.asset,
+      asset: trustedAsset,
       amount: amountWei,
       marketId: params.marketId,
       walletAddress: params.walletAddress,
@@ -227,18 +240,32 @@ export abstract class LendProvider<
   }
 
   /**
-   * Validate that a market is in the config's market allowlist
+   * Validate that a market is allowed for this provider.
    * @param marketId - Market identifier containing address and chainId
-   * @throws Error if market allowlist is configured but market is not in it
+   * @throws MarketNotAllowedError when the market is blocklisted, or when it is
+   * absent from the allowlist. An empty/undefined `marketAllowlist` fails closed
+   * (permits nothing): the signing path (open/close) then matches the read path.
+   * `getVault`/`getReserve` already throw when no allowlist resolves the market,
+   * and the borrow surface does the same, so an empty allowlist is never a silent
+   * allow-all.
    */
   protected validateMarketAllowed(marketId: LendMarketId): void {
     this.assertChainSupported(marketId.chainId)
 
-    if (
-      !this._config.marketAllowlist ||
-      this._config.marketAllowlist.length === 0
-    ) {
-      return
+    // Blocklist takes precedence over allowlist entries.
+    if (this._config.marketBlocklist?.length) {
+      const blocked = findMatchingConfig({
+        configs: this._config.marketBlocklist,
+        target: marketId,
+        matches: lendMarketIdMatches,
+      })
+      if (blocked) {
+        throw new MarketNotAllowedError({
+          address: marketId.address,
+          chainId: marketId.chainId,
+          reason: 'Market is on the marketBlocklist',
+        })
+      }
     }
 
     const foundMarket = findMatchingConfig({
@@ -297,10 +324,11 @@ export abstract class LendProvider<
    * @returns Filtered market configurations
    */
   private filterMarketConfigs(
+    markets: readonly LendMarketConfig[],
     chainId?: SupportedChainId,
     asset?: Asset,
   ): LendMarketConfig[] {
-    return filterMatchingConfigs(this._config.marketAllowlist, [
+    return filterMatchingConfigs(markets, [
       chainId === undefined
         ? undefined
         : (market: LendMarketConfig) => market.chainId === chainId,

@@ -1,5 +1,8 @@
 import { marketIdMatches } from '@/actions/borrow/core/markets.js'
-import { findMatchingConfig } from '@/actions/shared/marketConfigs.js'
+import {
+  findMatchingConfig,
+  selectAllowedConfigs,
+} from '@/actions/shared/marketConfigs.js'
 import {
   InvalidParamsError,
   MarketNotAllowedError,
@@ -35,7 +38,7 @@ export function validateQuoteAction(
  * trusted `BorrowMarketConfig` or throws `MarketNotAllowedError`.
  * @description Empty/undefined allowlists fail closed. Blocklist matches
  * are rejected with a distinct reason. Used by `BorrowProvider` to
- * resolve marketId → full config once on both read and write paths so
+ * resolve marketId to full config once on both read and write paths so
  * concrete providers don't repeat the lookup and so blocklist semantics
  * apply uniformly.
  */
@@ -76,9 +79,29 @@ export function requireAllowlistedBorrowMarketConfig(
 }
 
 /**
+ * Intersect a list of candidate market configs with the allowlist and drop any
+ * that are blocklisted.
+ * @returns Trusted allowlist entries matched by candidates.
+ */
+export function selectAllowlistedBorrowMarketConfigs(
+  candidates: readonly BorrowMarketConfig[],
+  config: {
+    marketAllowlist?: readonly BorrowMarketConfig[]
+    marketBlocklist?: readonly BorrowMarketConfig[]
+  },
+): BorrowMarketConfig[] {
+  return selectAllowedConfigs({
+    candidates,
+    allowlist: config.marketAllowlist,
+    blocklist: config.marketBlocklist,
+    matches: marketIdMatches,
+  })
+}
+
+/**
  * Validate that at least one configured borrow provider's allowlist
  * contains the supplied `marketId`. Used to gate dispatch of pre-built
- * quotes that arrive from untrusted (or stale) callers.
+ * quotes that arrive from untrusted or stale callers.
  */
 export function validateBorrowMarketIdInAnyAllowlist(
   marketId: BorrowMarketId,
@@ -92,6 +115,18 @@ export function validateBorrowMarketIdInAnyAllowlist(
         matches: marketIdMatches,
       })
     ) {
+      const blocked = findMatchingConfig({
+        configs: provider.config.marketBlocklist,
+        target: marketId,
+        matches: marketIdMatches,
+      })
+      if (blocked) {
+        throw new MarketNotAllowedError({
+          address: marketId.marketId,
+          chainId: marketId.chainId,
+          reason: 'Market is on the marketBlocklist',
+        })
+      }
       return
     }
   }

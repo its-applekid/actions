@@ -291,6 +291,17 @@ describe('BorrowProvider - openPosition', () => {
       }),
     ).rejects.toBeInstanceOf(MarketNotAllowedError)
   })
+
+  it('rejects when no allowlist is configured', async () => {
+    const provider = makeProvider({})
+    await expect(
+      provider.openPosition({
+        market,
+        walletAddress,
+        borrowAmount: { amount: 1 },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+  })
 })
 
 describe('BorrowProvider - closePosition', () => {
@@ -331,6 +342,33 @@ describe('BorrowProvider - closePosition', () => {
     expect(call.collateralAmount).toEqual({
       amountWei: 5_000_000_000_000_000_000n,
     })
+  })
+
+  it('rejects a market on the blocklist before calling the concrete hook', async () => {
+    const provider = makeProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    await expect(
+      provider.closePosition({
+        market,
+        walletAddress,
+        borrowAmount: { max: true },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    expect(provider.closeCalls).toEqual([])
+  })
+
+  it('rejects when no allowlist is configured before calling the concrete hook', async () => {
+    const provider = makeProvider({})
+    await expect(
+      provider.closePosition({
+        market,
+        walletAddress,
+        borrowAmount: { max: true },
+      }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+    expect(provider.closeCalls).toEqual([])
   })
 })
 
@@ -441,10 +479,25 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
     ).rejects.toBeInstanceOf(MarketNotAllowedError)
   })
 
+  it('getMarket rejects a blocklisted market even when allowlisted', async () => {
+    provider = makeProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    await expect(provider.getMarket(market)).rejects.toBeInstanceOf(
+      MarketNotAllowedError,
+    )
+  })
+
   it('getMarkets filters by chainId from the allowlist', async () => {
     provider = makeProvider({ marketAllowlist: [market, otherMarket] })
     const markets = await provider.getMarkets({ chainId: BASE_SEPOLIA_ID })
     expect(markets).toHaveLength(2)
+  })
+
+  it('getMarkets returns no markets when no allowlist is configured', async () => {
+    provider = makeProvider({})
+    await expect(provider.getMarkets()).resolves.toEqual([])
   })
 
   it('getMarkets filters by collateralAsset', async () => {
@@ -471,6 +524,61 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
     expect(noMatch).toHaveLength(0)
   })
 
+  it('getMarkets does not surface a caller-supplied market outside the allowlist', async () => {
+    provider = makeProvider({ marketAllowlist: [market] })
+    // Caller-supplied markets must intersect with the allowlist.
+    const markets = await provider.getMarkets({ markets: [otherMarket] })
+    expect(markets).toEqual([])
+  })
+
+  it('getMarkets still surfaces a caller-supplied market that is allowlisted', async () => {
+    provider = makeProvider({ marketAllowlist: [market] })
+    const markets = await provider.getMarkets({ markets: [market] })
+    expect(markets).toHaveLength(1)
+    expect(markets[0].name).toBe(market.name)
+  })
+
+  it('getMarkets still applies asset filters to caller-supplied allowlisted markets', async () => {
+    provider = makeProvider({ marketAllowlist: [market] })
+
+    await expect(
+      provider.getMarkets({
+        collateralAsset: borrowAsset,
+        markets: [market],
+      }),
+    ).resolves.toEqual([])
+    await expect(
+      provider.getMarkets({
+        borrowAsset: collateralAsset,
+        markets: [market],
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('getMarkets still applies chainId filters to caller-supplied allowlisted markets', async () => {
+    const otherChainMarket: BorrowMarketConfig = {
+      ...otherMarket,
+      chainId: 1 as SupportedChainId,
+    }
+    provider = makeProvider({ marketAllowlist: [market, otherChainMarket] })
+
+    await expect(
+      provider.getMarkets({
+        chainId: BASE_SEPOLIA_ID,
+        markets: [otherChainMarket],
+      }),
+    ).resolves.toEqual([])
+  })
+
+  it('getMarkets drops a caller-supplied market that is blocklisted', async () => {
+    provider = makeProvider({
+      marketAllowlist: [market, otherMarket],
+      marketBlocklist: [otherMarket],
+    })
+    const markets = await provider.getMarkets({ markets: [otherMarket] })
+    expect(markets).toEqual([])
+  })
+
   it('getPosition throws when walletAddress is missing', async () => {
     await expect(
       provider.getPosition({
@@ -487,6 +595,23 @@ describe('BorrowProvider - getMarket / getMarkets / getPosition', () => {
         walletAddress: zeroAddress,
       }),
     ).rejects.toBeInstanceOf(ZeroAddressError)
+  })
+
+  it('getPosition rejects a blocklisted market even when allowlisted', async () => {
+    provider = makeProvider({
+      marketAllowlist: [market],
+      marketBlocklist: [market],
+    })
+    await expect(
+      provider.getPosition({ marketId: market, walletAddress }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
+  })
+
+  it('getPosition rejects when no allowlist is configured', async () => {
+    provider = makeProvider({})
+    await expect(
+      provider.getPosition({ marketId: market, walletAddress }),
+    ).rejects.toBeInstanceOf(MarketNotAllowedError)
   })
 
   it('getPosition returns the concrete provider result', async () => {

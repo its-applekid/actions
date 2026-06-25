@@ -191,7 +191,10 @@ export interface BorrowMarketPosition {
   maxLtv: number
 }
 
-/** Filter parameters for `actions.borrow.getMarkets`. */
+/**
+ * Filter parameters for `actions.borrow.getMarkets`.
+ * @description All results are constrained to configured provider allowlists.
+ */
 export interface GetBorrowMarketsParams {
   /** Filter to markets whose `collateralAsset` matches */
   collateralAsset?: Asset
@@ -199,7 +202,7 @@ export interface GetBorrowMarketsParams {
   borrowAsset?: Asset
   /** Filter to markets on a specific chain */
   chainId?: SupportedChainId
-  /** Pre-filtered market configs (used internally by the provider) */
+  /** Market configs used to narrow configured allowlists */
   markets?: BorrowMarketConfig[]
 }
 

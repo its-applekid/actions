@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   filterMatchingConfigs,
   findMatchingConfig,
+  selectAllowedConfigs,
 } from '@/actions/shared/marketConfigs.js'
 
 describe('marketConfigs', () => {
@@ -49,6 +50,35 @@ describe('marketConfigs', () => {
 
     it('returns an empty list for missing configs', () => {
       expect(filterMatchingConfigs(undefined, [])).toEqual([])
+    })
+  })
+
+  describe('selectAllowedConfigs', () => {
+    it('returns matched allowlist entries and drops blocklisted matches', () => {
+      const candidate = { chainId: 8453, symbol: 'usdc', enabled: false }
+
+      const selected = selectAllowedConfigs({
+        candidates: [candidate, configs[1]],
+        allowlist: configs,
+        blocklist: [configs[1]],
+        matches: (config, target) =>
+          config.chainId === target.chainId &&
+          config.symbol.toLowerCase() === target.symbol.toLowerCase(),
+      })
+
+      expect(selected).toEqual([configs[2]])
+    })
+
+    it('fails closed when the allowlist is missing', () => {
+      const selected = selectAllowedConfigs({
+        candidates: [configs[0]],
+        allowlist: undefined,
+        blocklist: undefined,
+        matches: (config, target) =>
+          config.chainId === target.chainId && config.symbol === target.symbol,
+      })
+
+      expect(selected).toEqual([])
     })
   })
 })
