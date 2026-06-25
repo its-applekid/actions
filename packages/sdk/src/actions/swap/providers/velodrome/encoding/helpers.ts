@@ -84,9 +84,6 @@ export function buildSwapPrice(
 
 /**
  * Assert Universal Router calldata contains exactly the expected command byte.
- * @param commands - Packed Universal Router command bytes
- * @param command - Expected single command byte
- * @param expected - Human-readable expected calldata shape
  * @throws InvalidParamsError when another command is encoded
  */
 export function assertSingleUniversalCommand(

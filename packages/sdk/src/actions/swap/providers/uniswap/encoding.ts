@@ -243,19 +243,12 @@ const SETTLE_ALL = 0x0c
 const TAKE = 0x0e
 const BPS_DENOMINATOR = 10000n
 
-/**
- * V4 OPEN_DELTA sentinel for the TAKE action's `amount`: take the full positive
- * output delta produced by the preceding swap. Slippage is enforced separately
- * by the swap action's `amountOutMinimum`.
- * @see https://github.com/Uniswap/v4-periphery/blob/main/src/libraries/ActionConstants.sol
- */
+/** V4 TAKE amount sentinel: take the full positive output delta. */
 const OPEN_DELTA = 0n
 
 /**
- * Calculate the executable max input for exact-output V4 swaps.
- * @param amountInRaw - Quoted input amount before slippage
- * @param slippage - Slippage tolerance as a decimal
- * @returns Slippage-expanded maximum input amount
+ * Calculate the executable max input for exact-output V4 swaps after slippage.
+ * @returns Slippage-expanded maximum input amount.
  */
 export function calculateExactOutputAmountInMaximumRaw(
   amountInRaw: bigint,
@@ -359,12 +352,8 @@ export function encodeUniversalRouterSwap(params: EncodeSwapParams): Hex {
 }
 
 /**
- * @description Recover the recipient encoded in a V4 Universal Router swap's calldata by
- * decoding the TAKE action's params. Used by the wallet guard to verify the
- * signed calldata actually routes output to the executing wallet, not to a
- * destination implied only by trusted metadata.
- * @param swapCalldata - Calldata produced by {@link encodeUniversalRouterSwap}
- * @returns The recipient address baked into the TAKE action
+ * Recover the recipient encoded in a V4 Universal Router swap's TAKE params.
+ * @returns The recipient address baked into the signed calldata.
  * @throws InvalidParamsError when calldata is not a single V4 swap ending in TAKE.
  */
 export function decodeUniversalRouterRecipient(swapCalldata: Hex): Address {

@@ -240,11 +240,8 @@ export class ZeroAddressError extends ActionsError {
 }
 
 /**
- * Thrown at the encoder seam when a swap `recipient` is not a valid,
- * correctly-checksummed EVM address. Catches malformed, truncated, or
- * mis-checksummed (typo'd / address-poisoned) recipients before they are
- * baked verbatim into signed calldata, defense-in-depth even after upstream
- * recipient validation.
+ * Thrown when a swap recipient is malformed or not correctly checksummed.
+ * The encoder seam checks this before baking recipients into signed calldata.
  */
 export class InvalidRecipientError extends ActionsError {
   override name = 'InvalidRecipientError' as const
@@ -304,9 +301,7 @@ export class NativeAssetAddressError extends ActionsError {
 
 /**
  * Thrown when native ETH is requested on a router path that cannot settle,
- * wrap, or unwrap it. The Velodrome universal/CL encoders pull ERC-20 input
- * via `transferFrom` and do not emit native ETH wrap/unwrap commands, so fail
- * closed at the encoder seam instead.
+ * wrap, or unwrap it.
  */
 export class NativeAssetNotSupportedError extends ActionsError {
   override name = 'NativeAssetNotSupportedError' as const
@@ -379,12 +374,8 @@ export class InvalidParamsError extends ActionsError {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Thrown when a pre-built quote (swap, borrow, …) is dispatched against a
- * wallet whose address differs from the quote's `recipient`. Some routers
- * (Velodrome v2/leaf) and protocols (Morpho `supplyCollateral` / `borrow` /
- * `repay` / `withdrawCollateral`) encode the recipient or `onBehalf` address
- * directly into calldata, so silently swapping recipients would route assets
- * or position changes to the wrong account.
+ * Thrown when a pre-built quote is dispatched by a different wallet than the
+ * quote recipient. Prevents calldata-bound assets or positions routing wrong.
  */
 export class QuoteRecipientMismatchError extends ActionsError {
   override name = 'QuoteRecipientMismatchError' as const
@@ -401,11 +392,8 @@ export class QuoteRecipientMismatchError extends ActionsError {
 }
 
 /**
- * Thrown when a pre-built quote's metadata `recipient` equals the executing
- * wallet, but the recipient actually encoded in `execution.swapCalldata`
- * routes output somewhere else. Re-deriving the recipient from the signed
- * bytes (rather than trusting metadata) catches a tampered quote that would
- * otherwise pass the metadata-only `recipient === wallet` check.
+ * Thrown when quote metadata matches the wallet but calldata routes elsewhere.
+ * Re-deriving the recipient from signed bytes catches tampered quote metadata.
  */
 export class QuoteCalldataRecipientMismatchError extends ActionsError {
   override name = 'QuoteCalldataRecipientMismatchError' as const
@@ -422,10 +410,8 @@ export class QuoteCalldataRecipientMismatchError extends ActionsError {
 }
 
 /**
- * Thrown when pre-built quote execution data no longer matches provider-owned
- * expectations for the quote metadata. This catches tampered router targets,
- * native value, route tokens, pool params, or provider context before approval
- * checks and signing.
+ * Thrown when provider-owned quote execution fields no longer match metadata.
+ * Catches tampered router targets, value, routes, pools, or provider context.
  */
 export class QuoteExecutionMismatchError extends ActionsError {
   override name = 'QuoteExecutionMismatchError' as const

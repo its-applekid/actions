@@ -147,10 +147,8 @@ export function encodePoolSwap(
 }
 
 /**
- * @description Decode the recipient from Velodrome calldata using quote provider context.
- * @param swapCalldata - Encoded swap calldata
- * @param providerContext - Provider context emitted by `fetchPoolQuote`
- * @returns Recipient address baked into the calldata
+ * Decode the recipient from Velodrome calldata using quote provider context.
+ * @returns Recipient address baked into the calldata.
  * @throws InvalidParamsError when the context is missing or unsupported
  */
 export function decodePoolSwapRecipient(
