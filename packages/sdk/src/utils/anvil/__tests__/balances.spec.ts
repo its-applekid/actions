@@ -49,4 +49,10 @@ describe('anvil balance and receipt helpers', () => {
       assertSuccessfulReceipts(createUserOperationReceipt(false, 'success')),
     ).toThrow(ForkE2EReceiptError)
   })
+
+  it('throws when a user operation succeeds with a reverted bundle receipt', () => {
+    expect(() =>
+      assertSuccessfulReceipts(createUserOperationReceipt(true, 'reverted')),
+    ).toThrow(ForkE2EReceiptError)
+  })
 })
