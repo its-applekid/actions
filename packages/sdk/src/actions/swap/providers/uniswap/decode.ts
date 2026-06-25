@@ -23,30 +23,16 @@ import type { SwapQuote } from '@/types/swap/index.js'
 const V4_SWAP_COMMAND = '0x10'
 
 /**
- * Canonical V4 action sequences the encoder produces:
- * `[SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL]` (0x06,0x0c,0x0f) and the
- * exact-output variant (0x08,0x0c,0x0f). `TAKE_ALL` settles the output to
- * `msg.sender`; rejecting any other sequence blocks a `TAKE` leg with an
- * explicit attacker recipient.
+ * Canonical V4 action sequences the encoder produces.
+ * Rejecting any other sequence blocks explicit-recipient output diversion.
  */
 const V4_EXACT_IN_ACTIONS = '0x060c0f'
 const V4_EXACT_OUT_ACTIONS = '0x080c0f'
 
 /**
- * Decode a Uniswap V4 swap quote's calldata and assert it is the canonical
- * Universal Router swap the SDK builds, swapping the quoted pair to
- * `msg.sender`.
- * @description Uniswap V4 carries no recipient argument: `TAKE_ALL` settles the
- * output delta to the caller, so the executing wallet is structurally the
- * recipient. The risk is therefore not a wrong recipient field but a
- * non-canonical command/action set (a `SWEEP`/`TRANSFER` command or a `TAKE`
- * with an explicit recipient) that diverts funds. We assert the single
- * `V4_SWAP` command, the exact action sequence, and that the pool currencies
- * are the quoted assets, then trust the msg.sender settlement.
- * @param quote - Wallet-bound swap quote whose `execution.swapCalldata` is decoded.
+ * Decode Uniswap V4 calldata and assert the SDK's canonical msg.sender swap.
  * @returns The input amount the calldata is allowed to spend.
- * @throws QuoteCalldataMismatchError when the bytes are not a canonical V4 swap
- * of the quoted pair.
+ * @throws QuoteCalldataMismatchError when bytes do not match the quoted pair.
  */
 export function assertUniswapV4QuoteBound(
   quote: SwapQuote,

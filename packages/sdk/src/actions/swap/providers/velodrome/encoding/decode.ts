@@ -17,28 +17,15 @@ import { QuoteCalldataMismatchError } from '@/core/error/errors.js'
 import type { SwapQuote } from '@/types/swap/index.js'
 
 /**
- * Universal Router command bytes the encoder emits: `V2_SWAP_EXACT_IN` (0x08)
- * for v2 AMM pools and `V3_SWAP_EXACT_IN` (0x00) for CL/Slipstream pools. Both
- * carry the recipient as the first input field and the encoder sets it to the
- * `msg.sender` sentinel.
+ * Universal Router command bytes the encoder emits for v2 and CL swaps.
+ * Both carry the msg.sender recipient sentinel in the first input field.
  */
 const UNIVERSAL_SWAP_COMMANDS = new Set(['0x08', '0x00'])
 
 /**
- * Decode a Velodrome/Aerodrome swap quote's calldata and assert it routes
- * output to this wallet.
- * @description Two encoding families exist. The Universal Router path
- * (`universal` chains and CL pools) bakes the `msg.sender` sentinel as the
- * recipient, so the executing wallet is structurally the recipient: we assert
- * the single expected swap command and that the encoded recipient is the
- * sentinel. The v2/leaf router path encodes a literal `to` address, so we
- * decode it and assert it equals `quote.recipient` (which the namespace has
- * already bound to the wallet). Dispatch is selector-based, not config-based,
- * so a CL swap that compiles to Universal Router calldata on a `v2` chain is
- * still classified by its actual bytes.
- * @param quote - Wallet-bound swap quote whose `execution.swapCalldata` is decoded.
- * @throws QuoteCalldataMismatchError when the recipient encoded in the bytes is
- * not the executing wallet, or the calldata is not a recognized Velodrome swap.
+ * Decode Velodrome/Aerodrome calldata and assert it routes to this wallet.
+ * Dispatch is selector-based so actual bytes determine the encoding family.
+ * @throws QuoteCalldataMismatchError when bytes route elsewhere or are unknown.
  */
 export function assertVelodromeQuoteBound(
   quote: SwapQuote,

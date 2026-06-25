@@ -369,14 +369,8 @@ export class QuoteRecipientMissingError extends ActionsError {
 }
 
 /**
- * Thrown when a pre-built quote's `execution.routerAddress` is not the router
- * the resolving provider derives for the quote's chain.
- * @description The provider is resolved from the untrusted `quote.provider`
- * field, then approvals are built for that provider's own canonical router. A
- * quote whose `routerAddress` (the address the swap calldata is actually sent
- * to) points elsewhere would have the user approve one router and swap through
- * another. Re-deriving the router from static chain config (no RPC) and
- * rejecting any mismatch binds `provider` to `routerAddress` before signing.
+ * Thrown when quote `execution.routerAddress` is not the provider's router.
+ * Re-deriving from static config binds provider and router before signing.
  */
 export class RouterNotAllowedError extends ActionsError {
   override name = 'RouterNotAllowedError' as const
@@ -408,15 +402,8 @@ export class RouterNotAllowedError extends ActionsError {
 }
 
 /**
- * Thrown when the bytes a pre-built quote would sign do not match the trusted
- * metadata derived for that quote.
- * @description The dispatch path decodes `execution.swapCalldata` /
- * `execution.transactions[].data` and reconciles the fund-moving fields
- * (recipient / `onBehalfOf` / `receiver`, spender, target contract, market
- * params, native value) against what the SDK already knows. Any divergence
- * fails closed: the quote claims one thing in its metadata while the calldata
- * encodes another. `field` names the reconciled field, `expected` /`received`
- * carry the offending values when available.
+ * Thrown when signed quote bytes do not match trusted quote metadata.
+ * The dispatch path decodes calldata and reconciles fund-moving fields.
  */
 export class QuoteCalldataMismatchError extends ActionsError {
   override name = 'QuoteCalldataMismatchError' as const

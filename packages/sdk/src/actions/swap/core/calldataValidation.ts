@@ -6,12 +6,7 @@ import type { SwapQuote } from '@/types/swap/index.js'
 
 /**
  * Assert a decoded swap address equals the trusted address.
- * @description Address comparisons use viem's normalized equality so checksum
- * differences cannot produce false mismatches.
- * @param field - Field name reported when the address differs.
- * @param actual - Address decoded from calldata.
- * @param expected - Trusted address from quote metadata or provider config.
- * @returns Nothing when the addresses match.
+ * Uses viem-normalized equality so checksum differences cannot false-mismatch.
  * @throws QuoteCalldataMismatchError when the decoded address differs.
  */
 export function assertSwapAddressField(
@@ -25,12 +20,7 @@ export function assertSwapAddressField(
 
 /**
  * Assert a decoded swap amount equals the trusted raw amount.
- * @description Optional actual values are allowed so exact-input and
- * exact-output structs can share the same assertion helper.
- * @param field - Field name reported when the amount differs.
- * @param actual - Amount decoded from calldata.
- * @param expected - Trusted raw amount from quote metadata.
- * @returns Nothing when the amounts match.
+ * Optional actual values let exact-input/output structs share this helper.
  * @throws QuoteCalldataMismatchError when the decoded amount differs.
  */
 export function assertSwapAmountField(
@@ -48,11 +38,7 @@ export function assertSwapAmountField(
 
 /**
  * Assert a decoded swap deadline equals the quote deadline.
- * @description Quote deadlines are human-readable numbers while calldata uses
- * bigint, so this helper centralizes the explicit conversion.
- * @param quote - Quote carrying the trusted deadline.
- * @param actual - Deadline decoded from calldata.
- * @returns Nothing when the deadline matches.
+ * Centralizes the quote number to calldata bigint conversion.
  * @throws QuoteCalldataMismatchError when the decoded deadline differs.
  */
 export function assertSwapDeadlineField(
