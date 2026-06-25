@@ -10,10 +10,7 @@ export const MULTICALL3_ADDRESS: Address =
 
 /**
  * Minimal Multicall3 ABI fragment exposing `getEthBalance`.
- * @description viem's exported `multicall3Abi` only carries `aggregate3` (the
- * entry point it uses internally), so we declare `getEthBalance` here to read a
- * wallet's native balance inside the same batched `eth_call` as the ERC-20
- * `balanceOf` reads.
+ * Enables native balance reads in the same batch as ERC-20 `balanceOf`.
  */
 export const multicall3GetEthBalanceAbi = [
   {
