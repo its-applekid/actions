@@ -97,17 +97,7 @@ export function isMarketAsset(market: LendMarket, asset: Asset): boolean {
 /**
  * Intersect a list of candidate market configs with the provider's allowlist
  * and drop any that are blocklisted.
- * @description Caller-supplied market configs can only narrow configured
- * allowlists. The returned configs are always the trusted allowlist entries.
- * @param candidates - Market configs to filter (e.g. a caller-supplied
- * `getMarkets({ markets })` override, or the allowlist pre-filtered by
- * chain/asset)
- * @param config - Provider allowlist/blocklist
- * @returns The matching **allowlist** entries (not the candidate objects) so a
- * caller override can only ever narrow the allowlisted set. It can never
- * surface an off-allowlist market, smuggle a tampered config onto the read
- * path, or return a blocklisted market. An empty/undefined allowlist matches
- * nothing (fail closed), mirroring `LendProvider.validateMarketAllowed`.
+ * @returns Trusted allowlist entries matched by candidates.
  */
 export function selectAllowedLendMarkets(
   candidates: readonly LendMarketConfig[],

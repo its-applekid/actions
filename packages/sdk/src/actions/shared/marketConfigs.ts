@@ -37,14 +37,7 @@ export function filterMatchingConfigs<TConfig>(
 
 /**
  * Intersect candidate configs with an allowlist and drop blocklisted matches.
- * @description Returns allowlist entries matched by candidates, never the
- * candidate objects themselves. This keeps caller-supplied overrides from
- * smuggling untrusted config metadata into read paths.
- * @param candidates - Candidate configs to filter
- * @param allowlist - Trusted configs candidates must match
- * @param blocklist - Trusted configs candidates must not match
- * @param matches - Structural comparator for config identity
- * @returns Allowlist entries matched by candidates and absent from the blocklist
+ * Returns trusted allowlist entries, never caller-supplied candidate objects.
  */
 export function selectAllowedConfigs<TConfig>(params: {
   candidates: readonly TConfig[]

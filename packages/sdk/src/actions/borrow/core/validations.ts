@@ -81,15 +81,7 @@ export function requireAllowlistedBorrowMarketConfig(
 /**
  * Intersect a list of candidate market configs with the allowlist and drop any
  * that are blocklisted.
- * @description The read-path twin of `requireAllowlistedBorrowMarketConfig`:
- * it filters instead of throwing so a list endpoint silently drops misses.
- * Returns the matched **allowlist** entries (not the candidate objects), so a
- * caller-supplied `getMarkets({ markets })` override can only narrow the
- * allowlisted set. It can never surface an off-allowlist reserve, smuggle a
- * tampered config onto the read path, or return a blocklisted market.
- * @param candidates - Market configs to filter
- * @param config - Provider allowlist/blocklist
- * @returns Allowlisted, non-blocklisted market configs matched from `candidates`
+ * @returns Trusted allowlist entries matched by candidates.
  */
 export function selectAllowlistedBorrowMarketConfigs(
   candidates: readonly BorrowMarketConfig[],
